@@ -1,4 +1,4 @@
-"""Standalone HTTP task board plus MCP cards for Phanthy Motus."""
+"""Headless MCP meeting cards with durable local storage."""
 
 from __future__ import annotations
 
@@ -36,10 +36,11 @@ def call_mcp(url: str, name: str, arguments: dict, timeout: float = 3) -> dict:
 
 class MeetingService:
     def __init__(self, db_path: str | Path, *, audio: AnnouncementPublisher | None = None,
-                 bumi_url: str = "http://localhost:15704/mcp"):
+                 bumi_url: str = "http://localhost:15704/mcp", enable_health_check: bool = False):
         self.store = MeetingStore(db_path)
         self.audio = audio or AnnouncementPublisher(ROOT.parent / "assets", enabled=False)
         self.bumi_url = bumi_url
+        self.enable_health_check = enable_health_check
         self.audio_started = False
         self.last_audio_status = "画布音频卡片尚未启动"
         self._stop = threading.Event()
@@ -66,12 +67,9 @@ class MeetingService:
             self.last_audio_status = self.audio.error or "画布音频卡片尚未启动"
             return
         try:
-            speaker = call_mcp(self.bumi_url, "speaker", {"action": "info"})
-            if speaker.get("state") != "playing" or speaker.get("last_error"):
-                raise RuntimeError(f"Bumi 扬声器未就绪：{speaker.get('last_error') or speaker.get('state')}")
             if not self.audio.announce(cue):
-                raise RuntimeError(self.audio.error or "音频发布失败")
-            self.last_audio_status = f"已向 Bumi 发布提示：{cue}（扬声器实际发声需真机确认）"
+                raise RuntimeError(self.audio.error or "提醒发布失败")
+            self.last_audio_status = f"已向 TTS 发布提示：{cue}（扬声器实际发声需真机确认）"
         except Exception as exc:
             self.last_audio_status = f"播报失败：{exc}"
 
@@ -84,11 +82,16 @@ class MeetingService:
             return self.store.list_meetings()
         if action == "get":
             return {"meeting": self.store.get(mid), "tasks": self.store.list_tasks(mid),
-                    "audio_status": self.audio.error or self.last_audio_status}
+                    "audio_status": self.audio.error or self.last_audio_status,
+                    "health_check_enabled": self.enable_health_check}
+        if action == "brief":
+            return self.store.brief(mid)
         if action in ("check_person", "check_equipment"):
             return self.store.set_check(mid, "attendees" if action == "check_person" else "equipment",
                                         args.get("name"), args.get("confirmed"))
         if action == "check_robot":
+            if not self.enable_health_check:
+                raise ValueError("Bumi 健康检查已暂停；未调用机器人")
             try:
                 report = call_mcp(self.bumi_url, "health_check", {"action": "check"})
             except Exception as exc:
@@ -101,9 +104,13 @@ class MeetingService:
         if action == "record_decision":
             return self.store.add_note(mid, "decisions", args.get("text"))
         if action == "record_draft":
-            return self.store.add_note(mid, "drafts", args.get("text"))
+            return self.store.add_note(mid, "drafts", args.get("text"), args)
+        if action == "record_report":
+            return self.store.add_report(mid, args.get("text"), args.get("speaker", ""))
         if action == "end_meeting":
             return self.store.end(mid)
+        if action == "cancel_meeting":
+            return self.store.cancel(mid)
         if action == "confirm_task":
             return self.store.confirm_task(mid, args.get("draft_id"), owner=args.get("owner"),
                                            deadline=args.get("deadline"), deliverable=args.get("deliverable"),
@@ -126,8 +133,8 @@ class MeetingService:
         self.store.close()
 
 
-ACTIONS = ["create", "list", "get", "check_person", "check_equipment", "check_robot",
-           "begin_meeting", "next_agenda", "record_decision", "record_draft", "end_meeting",
+ACTIONS = ["create", "list", "get", "brief", "check_person", "check_equipment", "check_robot",
+           "begin_meeting", "next_agenda", "record_report", "record_decision", "record_draft", "end_meeting", "cancel_meeting",
            "confirm_task", "list_tasks", "submit_task", "review_task"]
 
 
@@ -142,7 +149,7 @@ def tools_list() -> list[dict]:
              "agenda": {"type": "array", "items": {"type": "object", "properties": {"title": {"type": "string"}, "minutes": {"type": "integer"}}}},
              "equipment": {"type": "array", "items": {"type": "string"}},
              "name": {"type": "string"}, "confirmed": {"type": "boolean"},
-             "text": {"type": "string"}, "draft_id": {"type": "string"},
+             "text": {"type": "string"}, "speaker": {"type": "string"}, "draft_id": {"type": "string"},
              "owner": {"type": "string"}, "deadline": {"type": "string"},
              "deliverable": {"type": "string"}, "reviewer": {"type": "string"},
              "acceptance": {"type": "string"}, "task_id": {"type": "string"},
@@ -151,23 +158,26 @@ def tools_list() -> list[dict]:
              "required": ["action"], "x-action-params": {
                  "create": {"params": ["title", "attendees", "agenda", "equipment"]},
                  "get": {"params": ["meeting_id"]},
+                 "brief": {"params": ["meeting_id"]},
                  "check_person": {"params": ["meeting_id", "name", "confirmed"]},
                  "check_equipment": {"params": ["meeting_id", "name", "confirmed"]},
                  "check_robot": {"params": ["meeting_id"]},
                  "begin_meeting": {"params": ["meeting_id"]},
                  "next_agenda": {"params": ["meeting_id"]},
                  "record_decision": {"params": ["meeting_id", "text"]},
-                 "record_draft": {"params": ["meeting_id", "text"]},
+                 "record_report": {"params": ["meeting_id", "text", "speaker"]},
+                 "record_draft": {"params": ["meeting_id", "text", "owner", "deadline", "deliverable", "reviewer", "acceptance"]},
                  "end_meeting": {"params": ["meeting_id"]},
+                 "cancel_meeting": {"params": ["meeting_id"]},
                  "confirm_task": {"params": ["meeting_id", "draft_id", "owner", "deadline", "deliverable", "reviewer", "acceptance", "confirmed"]},
                  "list_tasks": {"params": ["meeting_id"]},
                  "submit_task": {"params": ["task_id", "actor", "evidence"]},
                  "review_task": {"params": ["task_id", "actor", "approved", "note"]},
                  "list": {"params": []}, "start": {"params": []}, "stop": {"params": []}, "info": {"params": []}}}},
         {"name": "meeting_audio", "type": "sensor", "multiInstance": False,
-         "description": "Fixed Chinese agenda-time announcements as mono PCM16 16kHz audio for Bumi speaker.",
+         "description": "Fixed Chinese agenda reminders as text for the existing TTS card.",
          "inputSchema": {"type": "object", "properties": {"action": {"type": "string", "enum": ["start", "stop", "info"]}}, "required": ["action"]},
-         "topic_out": [{"topic": TOPIC, "format": "audio/pcm-16k", "message_type": "audio_msgs/msg/AudioChunk"}]},
+         "topic_out": [{"topic": TOPIC, "format": "data/json", "message_type": "std_msgs/msg/String"}]},
     ]
 
 
@@ -211,19 +221,14 @@ def make_handler(service: MeetingService):
             if path == "/api/tasks":
                 return self._send(200, service.store.list_tasks())
             if path == "/api/status":
-                return self._send(200, {"audio_status": service.audio.error or service.last_audio_status})
+                return self._send(200, {"audio_status": service.audio.error or service.last_audio_status,
+                                        "health_check_enabled": service.enable_health_check})
             if path.startswith("/api/meetings/"):
                 try:
                     return self._send(200, service.action({"action": "get", "meeting_id": path.split("/")[-1]}))
                 except ValueError as exc:
                     return self._send(404, {"error": str(exc)})
-            files = {"/": ("index.html", "text/html; charset=utf-8"),
-                     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
-                     "/style.css": ("style.css", "text/css; charset=utf-8")}
-            if path not in files:
-                return self._send(404, {"error": "不存在"})
-            filename, kind = files[path]
-            return self._send(200, (ROOT / "static" / filename).read_bytes(), kind)
+            return self._send(404, {"error": "此服务只提供会议 MCP 卡片；请使用 Agent Core 画布"})
 
         def do_POST(self):
             try:
@@ -277,12 +282,13 @@ def main():
     db_path = os.environ.get("MEETING_DB", "/opt/phanthy-motus/data/meeting-assistant/meetings.sqlite3")
     audio = AnnouncementPublisher(ROOT.parent / "assets", enabled=os.environ.get("MEETING_ROS", "1") == "1")
     service = MeetingService(db_path, audio=audio,
-                             bumi_url=os.environ.get("BUMI_MCP_URL", "http://localhost:15704/mcp"))
+                             bumi_url=os.environ.get("BUMI_MCP_URL", "http://localhost:15704/mcp"),
+                             enable_health_check=os.environ.get("MEETING_ENABLE_HEALTH_CHECK", "0") == "1")
     service.start_timer()
     if os.environ.get("REGISTER_AGENT_CORE", "1") == "1":
         threading.Thread(target=register_loop, args=(port, service._stop), daemon=True).start()
     http = ThreadingHTTPServer(("0.0.0.0", port), make_handler(service))
-    print(f"[meeting] board=http://localhost:{port} mcp=http://localhost:{port}/mcp", flush=True)
+    print(f"[meeting] mcp=http://localhost:{port}/mcp", flush=True)
     try:
         http.serve_forever()
     except KeyboardInterrupt:

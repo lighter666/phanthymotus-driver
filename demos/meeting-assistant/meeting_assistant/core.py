@@ -91,7 +91,7 @@ class MeetingStore:
             + [{"name": "Bumi", "confirmed": False, "source": "health_check", "report": None}],
             "agenda": items, "agenda_index": 0, "agenda_started_at": None,
             "warned_five": False, "warned_end": False,
-            "decisions": [], "drafts": [], "created_at": iso(now_utc()),
+            "reports": [], "decisions": [], "drafts": [], "created_at": iso(now_utc()),
         }
         with self.lock:
             self._save("meetings", meeting)
@@ -99,7 +99,8 @@ class MeetingStore:
 
     def _decorate(self, meeting: dict, at: datetime | None = None) -> dict:
         result = json.loads(json.dumps(meeting, ensure_ascii=False))
-        result["preflight_ready"] = all(p["confirmed"] for p in result["attendees"] + result["equipment"])
+        result["preflight_ready"] = result["status"] != "cancelled" and all(
+            p["confirmed"] for p in result["attendees"] + result["equipment"])
         if result["status"] == "active":
             elapsed = max(0, int(((at or now_utc()) - parse_time(result["agenda_started_at"])).total_seconds()))
             total = result["agenda"][result["agenda_index"]]["minutes"] * 60
@@ -117,13 +118,33 @@ class MeetingStore:
             rows = self.db.execute("SELECT data FROM meetings ORDER BY rowid DESC").fetchall()
             return [self._decorate(json.loads(row[0])) for row in rows]
 
+    def brief(self, meeting_id: str) -> dict:
+        """Return recorded evidence and action-item gaps for the agent to summarize."""
+        meeting = self.get(meeting_id)
+        fields = ("owner", "deadline", "deliverable", "reviewer", "acceptance")
+        drafts = []
+        for draft in meeting["drafts"]:
+            item = dict(draft)
+            item["missing_fields"] = [key for key in fields if not item.get(key)]
+            if item.get("deadline"):
+                try:
+                    parse_time(item["deadline"])
+                except ValueError:
+                    item["missing_fields"].append("deadline")
+            drafts.append(item)
+        return {"meeting_id": meeting_id, "title": meeting["title"],
+                "status": meeting["status"], "reports": meeting.get("reports", []),
+                "decisions": meeting["decisions"], "drafts": drafts,
+                "tasks": self.list_tasks(meeting_id),
+                "preflight_ready": meeting["preflight_ready"]}
+
     def set_check(self, meeting_id: str, kind: str, name: str, confirmed: bool) -> dict:
         if kind not in ("attendees", "equipment") or not isinstance(confirmed, bool):
             raise ValueError("确认参数无效")
         with self.lock:
             meeting = self._load("meetings", meeting_id)
-            if meeting["status"] == "ended":
-                raise ValueError("会议已结束")
+            if meeting["status"] in ("ended", "cancelled"):
+                raise ValueError("会议已结束或取消")
             entry = next((x for x in meeting[kind] if x["name"] == name), None)
             if entry is None:
                 raise ValueError("人员或设备不存在")
@@ -139,8 +160,8 @@ class MeetingStore:
         overall = report.get("status", report.get("overall_status", report.get("overall")))
         with self.lock:
             meeting = self._load("meetings", meeting_id)
-            if meeting["status"] == "ended":
-                raise ValueError("会议已结束")
+            if meeting["status"] in ("ended", "cancelled"):
+                raise ValueError("会议已结束或取消")
             entry = next(x for x in meeting["equipment"] if x["name"] == "Bumi")
             entry["confirmed"] = overall in ("正常", "normal")
             entry["report"] = report
@@ -187,14 +208,38 @@ class MeetingStore:
             self._save("meetings", meeting)
             return self._decorate(meeting, at)
 
-    def add_note(self, meeting_id: str, kind: str, text: str) -> dict:
+    def add_report(self, meeting_id: str, text: str, speaker: str = "") -> dict:
+        with self.lock:
+            meeting = self._load("meetings", meeting_id)
+            if meeting["status"] != "active":
+                raise ValueError("仅进行中的会议可以记录汇报")
+            meeting.setdefault("reports", []).append({
+                "id": uuid.uuid4().hex, "text": required(text, "汇报内容"),
+                "speaker": speaker.strip() if isinstance(speaker, str) else "",
+                "recorded_at": iso(now_utc()),
+            })
+            self._save("meetings", meeting)
+            return self._decorate(meeting)
+
+    def add_note(self, meeting_id: str, kind: str, text: str,
+                 fields: dict | None = None) -> dict:
         if kind not in ("decisions", "drafts"):
             raise ValueError("记录类型错误")
         with self.lock:
             meeting = self._load("meetings", meeting_id)
             if meeting["status"] != "active":
                 raise ValueError("仅进行中的会议可以记录")
-            meeting[kind].append({"id": uuid.uuid4().hex, "text": required(text, "内容"), "created_at": iso(now_utc())})
+            note = {"id": uuid.uuid4().hex, "text": required(text, "内容"), "created_at": iso(now_utc())}
+            if kind == "drafts":
+                fields = fields or {}
+                note.update({key: str(fields.get(key) or "").strip() for key in
+                             ("owner", "deadline", "deliverable", "reviewer", "acceptance")})
+                if note["deadline"]:
+                    note["deadline"] = iso(parse_time(note["deadline"]))
+                note["missing_fields"] = [key for key in
+                                          ("owner", "deadline", "deliverable", "reviewer", "acceptance")
+                                          if not note[key]]
+            meeting[kind].append(note)
             self._save("meetings", meeting)
             return self._decorate(meeting)
 
@@ -204,6 +249,16 @@ class MeetingStore:
             if meeting["status"] != "active":
                 raise ValueError("会议未进行")
             meeting["status"] = "ended"
+            self._save("meetings", meeting)
+            return self._decorate(meeting)
+
+    def cancel(self, meeting_id: str) -> dict:
+        """Cancel a meeting that has not started, retaining its audit record."""
+        with self.lock:
+            meeting = self._load("meetings", meeting_id)
+            if meeting["status"] != "planned":
+                raise ValueError("只能取消尚未开始的会议")
+            meeting["status"] = "cancelled"
             self._save("meetings", meeting)
             return self._decorate(meeting)
 

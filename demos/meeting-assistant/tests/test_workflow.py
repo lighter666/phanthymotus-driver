@@ -1,13 +1,16 @@
 import json
 import threading
 import unittest
+import urllib.error
 import urllib.request
 import uuid
 from datetime import datetime, timedelta, timezone
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
+from meeting_assistant.audio import AnnouncementPublisher, CUES
 from meeting_assistant.core import MeetingStore
 from meeting_assistant.server import MeetingService, dispatch_tool, make_handler, tools_list
 
@@ -49,6 +52,40 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(self.store.tick(self.mid, at + timedelta(minutes=11))["announcements"], [])
         self.store.next_agenda(self.mid, at + timedelta(minutes=11))
         self.assertEqual(self.store.tick(self.mid, at + timedelta(minutes=13))["announcements"], ["time_up"])
+
+    def test_cancel_only_planned_meeting_and_keep_record(self):
+        with self.assertRaisesRegex(ValueError, "会议未进行"):
+            self.store.end(self.mid)
+        cancelled = self.store.cancel(self.mid)
+        self.assertEqual(cancelled["status"], "cancelled")
+        self.assertFalse(cancelled["preflight_ready"])
+        with self.assertRaisesRegex(ValueError, "已结束或取消"):
+            self.store.set_check(self.mid, "attendees", "张三", True)
+        self.store.close()
+        self.store = MeetingStore(self.path)
+        self.assertEqual(self.store.get(self.mid)["status"], "cancelled")
+        with self.assertRaisesRegex(ValueError, "只能取消"):
+            self.store.cancel(self.mid)
+        with self.assertRaisesRegex(ValueError, "已开始或已结束"):
+            self.store.start(self.mid)
+
+    def test_report_and_action_gaps_survive_restart(self):
+        self.store.start(self.mid)
+        self.store.add_report(self.mid, "我下周五提交演示视频", "张三")
+        self.store.add_report(self.mid, "画面需要包含语音验收", "")
+        self.store.add_note(self.mid, "decisions", "先演示语音流程")
+        self.store.add_note(self.mid, "drafts", "提交演示视频",
+                            {"owner": "张三", "deliverable": "演示视频"})
+        with self.assertRaisesRegex(ValueError, "截止时间"):
+            self.store.add_note(self.mid, "drafts", "另一项行动", {"deadline": "下周五"})
+        self.store.close()
+        self.store = MeetingStore(self.path)
+        brief = self.store.brief(self.mid)
+        self.assertEqual([r["speaker"] for r in brief["reports"]], ["张三", ""])
+        self.assertEqual(brief["decisions"][0]["text"], "先演示语音流程")
+        self.assertEqual(brief["drafts"][0]["missing_fields"],
+                         ["deadline", "reviewer", "acceptance"])
+        self.assertEqual(brief["tasks"], [])
 
     def test_confirmation_submission_review_return_and_persistence(self):
         self.store.start(self.mid)
@@ -124,18 +161,58 @@ class HttpTests(unittest.TestCase):
         rpc = self.post("/mcp", {"jsonrpc":"2.0", "id":2, "method":"tools/call",
                                  "params":{"name":"meeting_manager", "arguments":{"action":"get", "meeting_id":meeting["id"]}}})
         self.assertEqual(json.loads(rpc["result"]["content"][0]["text"])["meeting"]["id"], meeting["id"])
+        self.post("/api/action", {"action":"begin_meeting", "meeting_id":meeting["id"]})
+        self.post("/api/action", {"action":"record_report", "meeting_id":meeting["id"],
+                                   "text":"甲下周提交演示视频", "speaker":"甲"})
+        brief_rpc = self.post("/mcp", {"jsonrpc":"2.0", "id":3, "method":"tools/call",
+                                      "params":{"name":"meeting_manager", "arguments":{
+                                          "action":"brief", "meeting_id":meeting["id"]}}})
+        self.assertEqual(json.loads(brief_rpc["result"]["content"][0]["text"])["reports"][0]["speaker"], "甲")
         names = [tool["name"] for tool in tools_list()]
         self.assertEqual(names, ["meeting_manager", "meeting_audio"])
-        self.assertEqual(dispatch_tool(self.service, "meeting_audio", {"action":"info"})["topic_out"][0]["format"], "audio/pcm-16k")
+        self.assertEqual(dispatch_tool(self.service, "meeting_audio", {"action":"info"})["topic_out"][0]["format"], "data/json")
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(self.base + "/")
+        self.assertEqual(error.exception.code, 404)
 
     def test_robot_failure_is_data_insufficient(self):
         meeting = self.post("/api/action", {"action":"create", "title":"测试会", "attendees":["甲"],
                                              "agenda":[{"title":"议题", "minutes":1}]})
+        self.service.enable_health_check = True
         with patch("meeting_assistant.server.call_mcp", side_effect=OSError("offline")):
             checked = self.post("/api/action", {"action":"check_robot", "meeting_id":meeting["id"]})
         robot = next(x for x in checked["equipment"] if x["name"] == "Bumi")
         self.assertEqual(robot["report"]["status"], "数据不足")
         self.assertFalse(robot["confirmed"])
+
+    def test_disabled_robot_check_does_not_call_bumi(self):
+        meeting = self.post("/api/action", {"action":"create", "title":"测试会", "attendees":["甲"],
+                                             "agenda":[{"title":"议题", "minutes":1}]})
+        with patch("meeting_assistant.server.call_mcp") as call:
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                self.post("/api/action", {"action":"check_robot", "meeting_id":meeting["id"]})
+        self.assertEqual(error.exception.code, 400)
+        call.assert_not_called()
+        self.assertIsNone(next(x for x in self.service.store.get(meeting["id"])["equipment"]
+                               if x["name"] == "Bumi")["report"])
+
+    def test_http_can_cancel_planned_meeting(self):
+        meeting = self.post("/api/action", {"action":"create", "title":"测试会", "attendees":["甲"],
+                                             "agenda":[{"title":"议题", "minutes":1}]})
+        result = self.post("/api/action", {"action":"cancel_meeting", "meeting_id":meeting["id"]})
+        self.assertEqual(result["status"], "cancelled")
+        self.assertIn("cancel_meeting", tools_list()[0]["inputSchema"]["properties"]["action"]["enum"])
+
+
+class AnnouncementTests(unittest.TestCase):
+    def test_fixed_reminder_is_text_for_tts(self):
+        publisher = AnnouncementPublisher.__new__(AnnouncementPublisher)
+        sent = []
+        publisher.error = None
+        publisher._publisher = SimpleNamespace(publish=sent.append)
+        publisher._message_type = SimpleNamespace
+        self.assertTrue(publisher.announce("five_minutes"))
+        self.assertEqual(json.loads(sent[0].data), {"text": CUES["five_minutes"]})
 
 
 if __name__ == "__main__":
