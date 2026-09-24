@@ -11,10 +11,11 @@ Bumi mic ──(audio/pcm-16k)──> ASR ──(data/json)──> decision_core
 remote_message ──(data/json)──────────────────────> decision_core  （文字备用）
 decision_core 底部绿色执行器 ──────────────────────> meeting_manager
 decision_core 底部绿色执行器 ──────────────────────> TTS
+decision_core 底部绿色执行器 ──────────────────────> ASR  （汇报结束后停止转写）
 meeting_audio ──(data/json)──> TTS ──(audio/pcm-16k)──> Bumi speaker
 ```
 
-原有 `meeting_audio → speaker` 音频连线需删除。`meeting_audio` 现在发布文字提醒，由 TTS 转成音频；TTS 也负责朗读 Agent 的会议总结。Bumi 扬声器一次只订阅一个输入话题，不能用两路音频源同时连接。ASR 卡片的 `trigger_mode` 在主持人控制的汇报时段设为 `vad`，否则唤醒词模式可能忽略普通发言。汇报结束后停止麦克风或 ASR，再让 Agent 口头总结，避免机器人播报被麦克风再次收录。先用一段短汇报测试 ASR 数据流确有文字输出，再测试总结。
+原有 `meeting_audio → speaker` 音频连线需删除。`meeting_audio` 现在发布文字提醒，由 TTS 转成音频；TTS 也负责朗读 Agent 的会议总结。Bumi 扬声器一次只订阅一个输入话题，不能用两路音频源同时连接。ASR 卡片的 `trigger_mode` 在主持人控制的汇报时段设为 `vad`，否则唤醒词模式可能忽略普通发言。汇报结束后由 Agent 调用 `asr.stop`，再调用 `tts.speak` 总结，避免机器人播报被麦克风再次收录。先用一段短汇报测试 ASR 数据流确有文字输出，再测试总结。
 
 ASR 输出只有文字和音频时间戳，不提供可靠的说话人身份；主持人应让每位汇报人自报姓名，未确定的负责人、截止时间、交付物、验收人和验收标准必须标为待确认。只有主持人确认五项字段后，`confirm_task` 才创建正式任务。
 
