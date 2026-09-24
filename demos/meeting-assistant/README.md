@@ -1,6 +1,6 @@
 # Bumi 会议全流程助手（演示版）
 
-独立 MCP 服务，提供 `meeting_manager` 和 `meeting_audio` 两张卡片；`SKILL.md` 是可导入范式 Agent Core 的会议流程说明。不会修改 Bumi 现有驱动。
+独立 MCP 服务，提供 `meeting_manager` 和 `meeting_audio` 两张卡片；`SKILL.md` 是会议流程说明。不会修改 Bumi 现有驱动。
 
 ## 本机试用
 
@@ -19,7 +19,17 @@ python -m meeting_assistant.server
 
 ## 真机演示
 
-将项目复制到 Bumi 板载计算机后，在项目目录运行 `docker compose up -d --build`。任务板地址为 `http://192.168.55.101:15740/`，MCP 地址为 `http://192.168.55.101:15740/mcp`。服务会注册到本机 Agent Core。确认画布上有 `meeting_manager`、`meeting_audio`，把 `meeting_audio` 的 `audio/pcm-16k` 输出接到现有 Bumi `speaker` 输入，再启动两张卡片。把 `SKILL.md` 内容导入 Agent Core 的 Skill 管理界面，并启用它。Bumi 原有 `health_check` 需要已部署且启用。
+将项目复制到 Bumi 板载计算机后，在项目目录运行 `docker compose up -d --build`。任务板地址为 `http://192.168.55.101:15740/`，MCP 地址为 `http://192.168.55.101:15740/mcp`。服务会注册到本机 Agent Core。确认画布上有 `meeting_manager`、`meeting_audio`，把 `meeting_audio` 的 `audio/pcm-16k` 输出接到现有 Bumi `speaker` 输入，再启动两张卡片。Bumi 原有 `health_check` 需要已部署且启用。
+
+### 离线安装会议 Skill
+
+Agent Core 的 Skill 界面不能直接上传本地 `SKILL.md`。若不使用 Resource Center，可在 Bumi 的本项目目录运行：
+
+```bash
+sudo python3 scripts/install_local_skill.py
+```
+
+脚本只修改 `/opt/phanthy-motus/data/data.db` 的 `skills` 配置行，保留其他技能，重复运行按 slug 更新；写入前将原配置备份为同目录的 `skills-row-backup-*.json`。完成后刷新 Agent Core 的「技能 → 已安装」页面，应看到「会议全流程助手」处于激活状态。此处的激活使 Skill 对 Agent 可见；Agent 在实际使用时还需调用 `activate_skill` 加载完整指令。无需提交 Resource Center 审核或创建 PR。
 
 基础镜像默认使用 `bj-warehouse.tencentcloudcr.com/phanthy-motus/ros-base:latest`，Bumi 已有该镜像时无需重新下载。镜像构建直接复制仓库内的提示音文件，不运行 `apt-get`，可在 Bumi 无法访问软件源时构建。
 
