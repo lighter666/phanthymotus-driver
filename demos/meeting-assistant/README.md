@@ -21,11 +21,11 @@ python -m meeting_assistant.server
 
 将项目复制到 Bumi 板载计算机后，在项目目录运行 `docker compose up -d --build`。任务板地址为 `http://192.168.55.101:15740/`，MCP 地址为 `http://192.168.55.101:15740/mcp`。服务会注册到本机 Agent Core。确认画布上有 `meeting_manager`、`meeting_audio`，把 `meeting_audio` 的 `audio/pcm-16k` 输出接到现有 Bumi `speaker` 输入，再启动两张卡片。把 `SKILL.md` 内容导入 Agent Core 的 Skill 管理界面，并启用它。Bumi 原有 `health_check` 需要已部署且启用。
 
-基础镜像默认使用 `bj-warehouse.tencentcloudcr.com/phanthy-motus/ros-base:latest`，Bumi 已有该镜像时无需重新下载。若构建仍在 `apt-get update` 失败，先检查板载计算机的 DNS/软件源；这与基础镜像名称错误是不同的问题。
+基础镜像默认使用 `bj-warehouse.tencentcloudcr.com/phanthy-motus/ros-base:latest`，Bumi 已有该镜像时无需重新下载。镜像构建直接复制仓库内的提示音文件，不运行 `apt-get`，可在 Bumi 无法访问软件源时构建。
 
 `MEETING_DB` 默认保存在宿主机 `/opt/phanthy-motus/data/meeting-assistant/meetings.sqlite3`，容器替换后数据仍在。`MEETING_PORT` 默认 15740，`BUMI_MCP_URL` 默认 `http://localhost:15704/mcp`，`AGENT_CORE_URL` 默认 `https://localhost:15678`；仅对本机 HTTPS 注册连接兼容 Agent Core 的自签名证书。
 
-Docker 构建时用 `espeak-ng` 和 `ffmpeg` 生成 `assets/five_minutes.wav` 与 `assets/time_up.wav`，格式为单声道 PCM16、16 kHz。中文合成音较机械，部署后需要试听确认。会议服务在每项议程剩余五分钟、到时各发布一次，短于五分钟的议程只播报到时。页面会显示发送失败；“已发布”仅表示音频提交给 ROS，不等于已证实扬声器发声。本机不构建镜像时没有语音素材，页面计时仍可使用。
+仓库内的 `assets/five_minutes.wav` 与 `assets/time_up.wav` 是预制的中文语音，格式为单声道 PCM16、16 kHz，部署后需试听确认。`scripts/generate_prompts.sh` 仅供有 `espeak-ng`、`ffmpeg` 的开发机重新生成素材，镜像构建不会运行它。会议服务在每项议程剩余五分钟、到时各发布一次，短于五分钟的议程只播报到时。页面会显示发送失败；“已发布”仅表示音频提交给 ROS，不等于已证实扬声器发声。
 
 ## 演示路径
 
