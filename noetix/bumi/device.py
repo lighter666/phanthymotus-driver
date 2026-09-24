@@ -155,6 +155,8 @@ class _BumiStateNode(Node):
         self._imu_pub     = self.create_publisher(String, self._imu_topic,     _LOW_LAT_QOS)
         self._battery_pub = self.create_publisher(String, self._battery_topic, _LOW_LAT_QOS)
         self._joints_pub  = self.create_publisher(String, self._joints_topic,  _LOW_LAT_QOS)
+        self._health_samples: dict[str, dict] = {}
+        self._health_lock = threading.Lock()
 
         self._running = False
         self._thread: threading.Thread | None = None
@@ -185,6 +187,7 @@ class _BumiStateNode(Node):
                         "angular_vel":   [imu.angular_vel[i] for i in range(3)],
                         "linear_acc":    [imu.linear_acc[i] for i in range(3)],
                     }
+                    self._record_health_sample("imu", imu_data)
                     msg = String()
                     msg.data = json.dumps(imu_data)
                     self._imu_pub.publish(msg)
@@ -211,6 +214,7 @@ class _BumiStateNode(Node):
                         "imu_quat": [float(imu.ori[3]), float(imu.ori[0]), float(imu.ori[1]), float(imu.ori[2])],  # SDK [x,y,z,w] → renderer [w,x,y,z]
                         "workmode": workmode,
                     }
+                    self._record_health_sample("joints", joints_data)
                     joints_out = String()
                     joints_out.data = json.dumps(joints_data)
                     self._joints_pub.publish(joints_out)
@@ -225,6 +229,7 @@ class _BumiStateNode(Node):
                         "temperature": int(bms.battery_temp),
                         "alarm": int(bms.battery_alarm),
                     }
+                    self._record_health_sample("battery", bms_data)
                     msg = String()
                     msg.data = json.dumps(bms_data)
                     self._battery_pub.publish(msg)
@@ -233,6 +238,18 @@ class _BumiStateNode(Node):
             except Exception as e:
                 self.get_logger().warn(f"State poll error: {e}")
                 time.sleep(0.5)
+
+    def _record_health_sample(self, source: str, data: dict) -> None:
+        with self._health_lock:
+            self._health_samples[source] = {
+                "data": data,
+                "received_monotonic": time.monotonic(),
+                "received_at": time.time(),
+            }
+
+    def health_snapshot(self) -> dict[str, dict]:
+        with self._health_lock:
+            return {name: sample.copy() for name, sample in self._health_samples.items()}
 
 
 
@@ -280,6 +297,9 @@ class StatePlugin:
                 "inputSchema": {"type": "object", "properties": {}},
             },
         ]
+
+    def health_snapshot(self) -> dict[str, dict]:
+        return self._node.health_snapshot()
 
     def start(self) -> None:
         self._node.start_polling()
@@ -1813,6 +1833,8 @@ class _MotionStateNode(Node):
         self._activity_velocity_threshold = activity_velocity_threshold
         self._running = False
         self._thread = None
+        self._health_sample: dict | None = None
+        self._health_lock = threading.Lock()
 
     @property
     def topic(self) -> str:
@@ -1834,6 +1856,12 @@ class _MotionStateNode(Node):
         while self._running:
             try:
                 payload = self._read_once()
+                with self._health_lock:
+                    self._health_sample = {
+                        "data": payload,
+                        "received_monotonic": time.monotonic(),
+                        "received_at": time.time(),
+                    }
                 msg = String()
                 msg.data = json.dumps(payload, ensure_ascii=False)
                 self._pub.publish(msg)
@@ -1847,6 +1875,10 @@ class _MotionStateNode(Node):
                 msg.data = json.dumps(error, ensure_ascii=False)
                 self._pub.publish(msg)
                 time.sleep(max(0.5, self._interval_s))
+
+    def health_snapshot(self) -> dict | None:
+        with self._health_lock:
+            return self._health_sample.copy() if self._health_sample else None
 
     def _read_once(self) -> dict:
         mode = int(self._high_ctrl.get_mode())
@@ -1959,6 +1991,13 @@ class MotionStatePlugin:
             "inputSchema": {"type": "object", "properties": {}},
             "topic_out": [{"topic": self._node.topic, "format": "data/json"}],
         }
+
+    def health_snapshot(self) -> dict | None:
+        return self._node.health_snapshot()
+
+    @property
+    def poll_interval_s(self) -> float:
+        return self._node._interval_s
 
     def start(self):
         self._node.start_polling()

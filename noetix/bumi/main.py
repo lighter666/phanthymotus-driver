@@ -120,6 +120,8 @@ class BumiDeviceBundle:
         self._plugins: list = []
         plugins_cfg = cfg.get("plugins", {})
         camera_plugin = None
+        state_plugin = None
+        motion_state_plugin = None
 
         if plugins_cfg.get("state", {}).get("enabled", False) and high_ctrl is not None:
             from device import StatePlugin
@@ -154,6 +156,13 @@ class BumiDeviceBundle:
                 plugins_cfg["motion_state"], namespace, executor, high_ctrl)
             self._plugins.append(motion_state_plugin)
             print("[bundle] MotionStatePlugin loaded")
+
+        if plugins_cfg.get("health_check", {}).get("enabled", False):
+            from health_check import HealthCheckPlugin
+            self._plugins.append(HealthCheckPlugin(
+                plugins_cfg["health_check"], state_plugin, motion_state_plugin,
+            ))
+            print("[bundle] HealthCheckPlugin loaded")
 
         if plugins_cfg.get("vision_capture", {}).get("enabled", False):
             from device import VisionCapturePlugin

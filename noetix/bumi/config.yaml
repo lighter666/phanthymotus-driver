@@ -24,6 +24,11 @@ plugins:
     poll_interval_s: 0.5
     # Activity classification only; this is not a motor safety or command limit.
     activity_velocity_threshold: 0.15
+  health_check:
+    enabled: true
+    battery_min_soc: 20
+    # Add temperature_limits only after the team confirms Bumi limits and units.
+    # Example shape: temperature_limits: {battery: 60, joints: 80}
   vision_capture:
     enabled: true
     # Existing host bind mount keeps photos/videos across container replacements.

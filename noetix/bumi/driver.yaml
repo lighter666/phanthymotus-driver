@@ -26,4 +26,5 @@ cards:
   - { name: camera,            type: sensor }
   - { name: depth,             type: sensor }
   - { name: motion_state,      type: sensor }
+  - { name: health_check,      type: actuator }
   - { name: vision_capture,    type: actuator }

@@ -68,6 +68,7 @@ COPY resource/ /work/resource/
 COPY common/ /work/common/
 COPY main.py   /work/main.py
 COPY device.py /work/device.py
+COPY health_check.py /work/health_check.py
 COPY config.yaml /work/config.yaml
 COPY deploy/     /deploy/
 
