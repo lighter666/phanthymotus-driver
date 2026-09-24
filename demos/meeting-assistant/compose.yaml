@@ -1,0 +1,17 @@
+services:
+  meeting-assistant:
+    build: .
+    image: meeting-assistant-demo:local
+    container_name: meeting-assistant-demo
+    network_mode: host
+    ipc: host
+    volumes:
+      - /opt/phanthy-motus/dds-local.xml:/opt/phanthy-motus/dds-local.xml:ro
+      - /opt/phanthy-motus/data:/opt/phanthy-motus/data
+    environment:
+      - ROS_DOMAIN_ID=42
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+      - FASTRTPS_DEFAULT_PROFILES_FILE=/opt/phanthy-motus/dds-local.xml
+      - AGENT_CORE_URL=https://localhost:15678
+      - BUMI_MCP_URL=http://localhost:15704/mcp
+    restart: always

@@ -1,0 +1,32 @@
+# Bumi 会议全流程助手（演示版）
+
+独立 MCP 服务，提供 `meeting_manager` 和 `meeting_audio` 两张卡片；`SKILL.md` 是可导入范式 Agent Core 的会议流程说明。不会修改 Bumi 现有驱动。
+
+## 本机试用
+
+Windows PowerShell：
+
+```powershell
+$env:MEETING_ROS='0'
+$env:REGISTER_AGENT_CORE='0'
+$env:MEETING_DB=(Join-Path (Get-Location) 'demo.sqlite3')
+python -m meeting_assistant.server
+```
+
+打开 `http://localhost:15740/`。没有 ROS2 和 Bumi 时，会议、计时、任务、验收仍可试用；Bumi 健康检查和播报会明确显示不可用。
+
+可选：先在另一个终端以相同 `MEETING_DB` 运行 `python -m scripts.seed_demo`，生成一场示例会议和两条尚未派发的行动项草稿。
+
+## 真机演示
+
+将项目复制到 Bumi 板载计算机后，在项目目录运行 `docker compose up -d --build`。任务板地址为 `http://192.168.55.101:15740/`，MCP 地址为 `http://192.168.55.101:15740/mcp`。服务会注册到本机 Agent Core。确认画布上有 `meeting_manager`、`meeting_audio`，把 `meeting_audio` 的 `audio/pcm-16k` 输出接到现有 Bumi `speaker` 输入，再启动两张卡片。把 `SKILL.md` 内容导入 Agent Core 的 Skill 管理界面，并启用它。Bumi 原有 `health_check` 需要已部署且启用。
+
+`MEETING_DB` 默认保存在宿主机 `/opt/phanthy-motus/data/meeting-assistant/meetings.sqlite3`，容器替换后数据仍在。`MEETING_PORT` 默认 15740，`BUMI_MCP_URL` 默认 `http://localhost:15704/mcp`，`AGENT_CORE_URL` 默认 `https://localhost:15678`；仅对本机 HTTPS 注册连接兼容 Agent Core 的自签名证书。
+
+Docker 构建时用 `espeak-ng` 和 `ffmpeg` 生成 `assets/five_minutes.wav` 与 `assets/time_up.wav`，格式为单声道 PCM16、16 kHz。中文合成音较机械，部署后需要试听确认。会议服务在每项议程剩余五分钟、到时各发布一次，短于五分钟的议程只播报到时。页面会显示发送失败；“已发布”仅表示音频提交给 ROS，不等于已证实扬声器发声。本机不构建镜像时没有语音素材，页面计时仍可使用。
+
+## 演示路径
+
+创建会议 → 确认人员和投影/网络 → 检查 Bumi → 开始会议 → 记录决策和两条行动项草稿 → 结束会议 → 主持人补齐任务字段并确认 → 负责人提交说明 → 验收人通过或退回。正式任务要求负责人、截止时间、交付物、验收人、验收标准；草稿不自动派发。任务板仅按输入的姓名限制操作，**没有账号认证**，仅供受控演示环境使用。
+
+运行测试：`python -m unittest discover -s tests -v`。

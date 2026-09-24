@@ -1,0 +1,7 @@
+**/__pycache__/
+**/*.pyc
+tests/
+.tmp/
+.build-deps/
+*.sqlite3*
+work/

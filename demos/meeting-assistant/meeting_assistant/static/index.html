@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bumi 会议全流程助手</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header><div><small>BUMI · MEETING ASSISTANT</small><h1>会议全流程助手</h1><p>从准备到验收，让每项决定都有明确的下一步。</p></div><span id="connection">本地任务板</span></header>
+  <main>
+    <aside>
+      <h2>创建会议</h2>
+      <form id="create-form">
+        <label>会议名称<input name="title" required placeholder="例如：Bumi 迭代评审"></label>
+        <label>参会人（每行一人）<textarea name="attendees" required placeholder="张三&#10;李四"></textarea></label>
+        <label>议程（每行「名称,分钟」）<textarea name="agenda" required placeholder="进展回顾,10&#10;问题与决策,15"></textarea></label>
+        <label>其他设备（每行一项）<textarea name="equipment">投影&#10;网络</textarea></label>
+        <button type="submit">创建会议</button>
+      </form>
+      <h2>会议列表</h2><div id="meetings"></div>
+    </aside>
+    <div class="workspace">
+      <div id="flash" role="status"></div>
+      <div id="empty" class="panel"><h2>请选择或创建一场会议</h2><p>会前确认人员与设备，会议进行时记录决策和待办，会后确认任务并跟进验收。</p></div>
+      <div id="detail" hidden>
+        <section class="panel"><div class="heading"><div><small id="meeting-id"></small><h2 id="meeting-title"></h2></div><span id="meeting-status" class="badge"></span></div><p id="preflight-status"></p><div class="grid two"><div><h3>人员确认</h3><div id="attendees"></div></div><div><h3>设备确认</h3><div id="equipment"></div></div></div><div class="actions"><button type="button" id="check-robot">检查 Bumi</button><button type="button" id="begin-meeting">开始会议</button><button type="button" id="end-meeting" class="secondary">结束会议</button></div></section>
+        <section class="panel"><div class="heading"><h2>议程计时</h2><strong id="timer">--:--</strong></div><div id="agenda"></div><button type="button" id="next-agenda">下一项议程</button><p id="audio-status" class="muted"></p></section>
+        <div class="grid two">
+          <section class="panel"><h2>记录决策</h2><form id="decision-form"><textarea name="text" required placeholder="写下已达成的决定"></textarea><button type="submit">记录决策</button></form><div id="decisions"></div></section>
+          <section class="panel"><h2>行动项草稿</h2><form id="draft-form"><textarea name="text" required placeholder="写下要完成的事；会后再明确负责人和验收标准"></textarea><button type="submit">添加草稿</button></form><div id="drafts"></div></section>
+        </div>
+        <section class="panel"><h2>确认正式任务</h2><p class="muted">只有主持人确认后才会进入任务板。</p><form id="task-form" class="grid two"><label>行动项草稿<select name="draft_id" required></select></label><label>负责人<select name="owner" required></select></label><label>截止时间<input name="deadline" type="datetime-local" required></label><label>交付物<input name="deliverable" required placeholder="例如：测试报告 PDF"></label><label>验收人<select name="reviewer" required></select></label><label>验收标准<input name="acceptance" required placeholder="例如：覆盖正常、低电量、断流"></label><button type="submit">主持人确认并创建任务</button></form></section>
+        <section class="panel"><div class="heading"><h2>任务板</h2><span id="task-count"></span></div><div id="tasks"></div></section>
+      </div>
+    </div>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

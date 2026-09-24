@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.build-deps/
+.tmp/
+*.sqlite3*
+tests/tmp*/
+write-test.txt
