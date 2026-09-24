@@ -1,4 +1,4 @@
-ARG ROS_BASE_IMAGE=bj-warehouse.tencentcloud.com/phanthy-motus/ros-base:latest
+ARG ROS_BASE_IMAGE=bj-warehouse.tencentcloudcr.com/phanthy-motus/ros-base:latest
 FROM ${ROS_BASE_IMAGE}
 WORKDIR /work/meeting-assistant
 RUN apt-get update && apt-get install -y --no-install-recommends espeak-ng ffmpeg && rm -rf /var/lib/apt/lists/*
