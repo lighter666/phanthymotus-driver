@@ -44,16 +44,16 @@ def install(db_path: Path, skill_path: Path) -> tuple[str, Path | None]:
     now = dt.datetime.now().astimezone().isoformat(timespec="seconds")
     template = {
         "slug": SLUG,
-        "name": "会议全流程助手",
+        "name": "会议纪要助手",
         "description": description,
         "oneLiner": "听取汇报，口头总结负责人、期限、交付物和验收标准",
         "instruction": instruction,
         "category": "robot",
-        "version": "0.1.0",
+        "version": "0.2.0",
         "author": "local",
         "installedAt": now,
         "active": True,
-        "requiredTools": ["meeting_manager", "meeting_audio", "mic", "asr", "tts", "speaker"],
+        "requiredTools": ["mic", "asr", "tts", "speaker"],
         "configSchema": {},
         "icon": "📋",
     }

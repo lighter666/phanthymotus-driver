@@ -50,7 +50,13 @@ class InstallLocalSkillTests(unittest.TestCase):
                 conn.execute("CREATE TABLE config (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
                 conn.execute(
                     "INSERT INTO config VALUES('skills', ?)",
-                    (json.dumps({"installed": [{"slug": "keep-me", "name": "其他技能"}]}),),
+                    (json.dumps({"installed": [
+                        {"slug": "keep-me", "name": "其他技能"},
+                        {"slug": "meeting-full-cycle-assistant", "version": "0.1.0",
+                         "installedAt": "2026-09-24T12:00:00+08:00",
+                         "instruction": "old meeting_manager instruction",
+                         "requiredTools": ["meeting_manager", "meeting_audio"]}
+                    ]}),),
                 )
                 conn.commit()
             command = [
@@ -69,13 +75,21 @@ class InstallLocalSkillTests(unittest.TestCase):
             ])
             meeting = skills[1]
             self.assertTrue(meeting["active"])
-            self.assertIn("meeting_manager.check_robot", meeting["instruction"])
+            self.assertEqual(meeting["version"], "0.2.0")
+            self.assertEqual(meeting["installedAt"], "2026-09-24T12:00:00+08:00")
+            self.assertEqual(meeting["requiredTools"], ["mic", "asr", "tts", "speaker"])
+            self.assertNotIn("meeting_manager", meeting["instruction"])
+            self.assertNotIn("meeting_audio", meeting["instruction"])
+            self.assertIn("继续收听", meeting["instruction"])
             self.assertFalse(meeting["instruction"].startswith("---"))
             backups = list(test_dir.glob("skills-row-backup-*.json"))
             self.assertEqual(len(backups), 1)
             self.assertEqual(
                 json.loads(backups[0].read_text(encoding="utf-8"))["key"], "skills"
             )
+            old = json.loads(json.loads(backups[0].read_text(encoding="utf-8"))["value"])
+            self.assertEqual(old["installed"][1]["version"], "0.1.0")
+            self.assertEqual(skills[0], {"slug": "keep-me", "name": "其他技能"})
         finally:
             shutil.rmtree(test_dir)
 

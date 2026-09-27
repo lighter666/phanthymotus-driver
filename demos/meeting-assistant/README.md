@@ -1,41 +1,56 @@
-# Bumi 会议全流程助手（Skill + 画布卡片）
+# Bumi 会议纪要助手（Skill + 现有音频卡片）
 
-此演示不提供独立任务板页面。`meeting_manager` 卡片负责会议、汇报原文、决策、行动项和验收的本地持久化；`meeting_audio` 卡片发布固定的议程提醒文字；`SKILL.md` 引导 Agent 听取汇报、提炼关键信息并用现有 TTS 口头总结。服务 MCP 地址为 `http://<Bumi-IP>:15740/mcp`，数据保存在 `/opt/phanthy-motus/data/meeting-assistant/meetings.sqlite3`。
+0.2.0 只依赖 mic、asr、tts、speaker，由 Agent 在当前对话中整理关键决策和五字段行动项。remote_message 用于文字汇报、纠正以及播报后手动恢复收听。不需要运行自定义会议服务，不提供文件导出、可靠计时或跨会话任务跟进。
 
-## Bumi 画布连接
+## 更新安装
 
-停止智能控制后调整画布，连接如下：
-
-```text
-Bumi mic ──(audio/pcm-16k)──> ASR ──(data/json)──> decision_core
-remote_message ──(data/json)──────────────────────> decision_core  （文字备用）
-decision_core 底部绿色执行器 ──────────────────────> meeting_manager
-decision_core 底部绿色执行器 ──────────────────────> TTS
-decision_core 底部绿色执行器 ──────────────────────> ASR  （汇报结束后停止转写）
-meeting_audio ──(data/json)──> TTS ──(audio/pcm-16k)──> Bumi speaker
-```
-
-原有 `meeting_audio → speaker` 音频连线需删除。`meeting_audio` 现在发布文字提醒，由 TTS 转成音频；TTS 也负责朗读 Agent 的会议总结。Bumi 扬声器一次只订阅一个输入话题，不能用两路音频源同时连接。ASR 卡片的 `trigger_mode` 在主持人控制的汇报时段设为 `vad`，否则唤醒词模式可能忽略普通发言。汇报结束后由 Agent 调用 `asr.stop`，再调用 `tts.speak` 总结，避免机器人播报被麦克风再次收录。先用一段短汇报测试 ASR 数据流确有文字输出，再测试总结。
-
-ASR 输出只有文字和音频时间戳，不提供可靠的说话人身份；主持人应让每位汇报人自报姓名，未确定的负责人、截止时间、交付物、验收人和验收标准必须标为待确认。只有主持人确认五项字段后，`confirm_task` 才创建正式任务。
-
-## 部署与 Skill 更新
-
-在 Bumi 的本项目目录运行：
+在 Bumi 执行（先停止画布智能控制）：
 
 ```bash
+cd ~/phanthymotus-driver-meeting
 git pull --ff-only
 cd demos/meeting-assistant
-docker compose up -d --build
 sudo python3 scripts/install_local_skill.py
 ```
 
-安装脚本按 slug 更新 Agent Core 中的 Skill，并在写入前备份原 `skills` 配置行。安装完成后刷新 Agent Core「技能 → 已安装」。如 Agent 仍沿用旧指令，可让它先调用 `deactivate_skill`，再调用 `activate_skill`，slug 均为 `meeting-full-cycle-assistant`。无需 Resource Center 或 PR。
+无需构建 Docker 镜像。脚本以同一个 slug meeting-full-cycle-assistant 覆盖更新，版本为 0.2.0，显示名为“会议纪要助手”；保留其他技能，并备份原 skills 配置行。刷新技能列表，再通过 remote_message 要求 Agent 先 deactivate_skill、再 activate_skill，标识均为 meeting-full-cycle-assistant。核对日志中加载的新指令：当前对话整理、手动恢复收听、不依赖自定义会议服务。
 
-`MEETING_ENABLE_HEALTH_CHECK=0` 为默认值，`check_robot` 会拒绝执行且**不会请求 Bumi 驱动**。只有今后主持人要求健康检查时，才将 `compose.yaml` 中的值改成 `1` 并重建服务。未开始的旧会议可通过 `meeting_manager.cancel_meeting` 标为已取消，记录保留；`end_meeting` 只适用于已开始的会议。
+## 画布调整
 
-## 演示
+停止智能控制后，从本次画布移除 meeting_manager、meeting_audio 及其连线。旧服务代码和数据库保留，不删除数据，不必卸载全局 MCP 服务。
 
-主持人通过 Bumi 麦克风说出会议汇报，或用 `remote_message` 输入文字。Agent 把原话存为 `record_report`，明确决策存为 `record_decision`，行动项存为 `record_draft`。要求总结时，它调用 `brief` 获取已保存内容和缺失字段，再调用 `tts.speak` 读出“谁在何时完成什么、交付什么、由谁按什么标准验收”。不确定的字段说“待确认”，草稿不能说成已派发。负责人提交证据后由验收人审核。
+```text
+Bumi mic → ASR → decision_core
+remote_message → decision_core
+decision_core 底部执行器 → ASR
+decision_core 底部执行器 → TTS
+TTS → Bumi speaker
+```
 
-构建使用 Bumi 已有的 `bj-warehouse.tencentcloudcr.com/phanthy-motus/ros-base:latest` 镜像，不运行 `apt-get`。运行本地回归测试：`python -m unittest discover -s tests -v`。
+ASR 设为 vad。TTS 无需接入 meeting_audio；Agent 通过工具调用 speak。重新启动画布后检查 TTS 实际输出话题与 speaker 订阅一致，不沿用旧的 /meeting_assistant/announcements/tts。
+
+必须保留可用的 remote_message 入口：总结后 ASR 保持停止，语音“继续收听”此时无法触发 Agent。若平台不允许两条数据线同时连接 decision_core，文字操作时切换到 remote_message；输入“继续收听”并确认恢复成功后再接回 ASR。不要猜 ASR 的麦克风话题或创建重复实例。
+
+## 演示话术
+
+每一步等待 Agent 完成本轮操作，再输入下一步。
+
+1. 通过 remote_message 输入：“请激活 meeting-full-cycle-assistant，开始一次会议纪要演示，主题为产品演示准备，参会人张三和李四。Bumi 未检查，不调用健康检查。我同意开始收听，请关闭自动旁白，汇报期间不要插话。”
+2. 口述或文字输入：“我是张三。我们决定先完成演示检查。张三在 2026 年 10 月 2 日 18 点北京时间前交付演示检查清单，李四验收，标准是麦克风转写、任务字段、语音播报三项都有测试结果。另有一项待办是准备演示视频，负责人和验收标准还没有确定。”测试时将截止日期换成合适的未来时间。
+3. 输入：“汇报结束，请总结。”检查先停止 ASR，再生成决策、行动项和待确认问题，并由 TTS 播报。第二项不能擅自补齐。
+4. 实际播报结束后，通过 remote_message 输入：“继续收听。”核对原 ASR 恢复后再口述补充，或者直接通过文字补充。
+5. 输入：“我确认当前纪要。”只能标记对话内容已确认，不能声称已派单、入库或通知人员。
+
+新会话或重启后需要主持人重新提供背景。平台是否展示普通文字回复需现场确认；本版没有独立页面和下载文档。
+
+## 验证与已知阻塞
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+自动测试验证覆盖旧版本、清除旧工具依赖、重复安装、备份与保留其他技能。真机需验证安静收听、ASR 暂停/恢复、纪要字段和实际出声。
+
+此前日志显示 TTS 生成 23 帧音频，bumi_speaker 订阅正确，但 Bumi 未出声；该问题尚未解决。queued 或发布帧数都不能作为实际播报成功的证据。重接画布后仍无声时，保留新的 TTS 输出话题、ROS 订阅信息和 Bumi 播放日志，继续定位运行中的驱动；不要仅为此盲目更换镜像。
+
+旧会议服务仅保留供历史记录和回退使用，数据位置为 /opt/phanthy-motus/data/meeting-assistant/meetings.sqlite3；新版 Skill 不查询或更新它。回退时使用安装脚本生成的 skills 配置备份恢复对应技能，注意保留备份之后新增的其他技能，再重新激活旧技能及恢复旧画布。
