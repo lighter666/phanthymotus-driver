@@ -36,7 +36,7 @@ def call_mcp(url: str, name: str, arguments: dict, timeout: float = 3) -> dict:
 
 class MeetingService:
     def __init__(self, db_path: str | Path, *, audio: AnnouncementPublisher | None = None,
-                 bumi_url: str = "http://localhost:15704/mcp", enable_health_check: bool = False):
+                 bumi_url: str = "http://localhost:15741/mcp", enable_health_check: bool = False):
         self.store = MeetingStore(db_path)
         self.audio = audio or AnnouncementPublisher(ROOT.parent / "assets", enabled=False)
         self.bumi_url = bumi_url
@@ -282,7 +282,7 @@ def main():
     db_path = os.environ.get("MEETING_DB", "/opt/phanthy-motus/data/meeting-assistant/meetings.sqlite3")
     audio = AnnouncementPublisher(ROOT.parent / "assets", enabled=os.environ.get("MEETING_ROS", "1") == "1")
     service = MeetingService(db_path, audio=audio,
-                             bumi_url=os.environ.get("BUMI_MCP_URL", "http://localhost:15704/mcp"),
+                             bumi_url=os.environ.get("BUMI_MCP_URL", "http://localhost:15741/mcp"),
                              enable_health_check=os.environ.get("MEETING_ENABLE_HEALTH_CHECK", "0") == "1")
     service.start_timer()
     if os.environ.get("REGISTER_AGENT_CORE", "1") == "1":

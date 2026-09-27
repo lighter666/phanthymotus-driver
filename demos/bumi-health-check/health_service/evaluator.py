@@ -8,6 +8,19 @@ from datetime import datetime, timezone
 SOURCE_INTERVALS = {"battery": 1.0, "imu": 0.05, "joints": 0.1}
 
 
+def valid_quaternion(value):
+    return (isinstance(value, list) and len(value) == 4
+            and all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                    and math.isfinite(v) for v in value)
+            and any(v != 0 for v in value))
+
+
+def valid_joints(value):
+    return (isinstance(value, list) and len(value) == 21
+            and all(isinstance(j, dict) and type(j.get("idx")) is int for j in value)
+            and {j["idx"] for j in value} == set(range(21)))
+
+
 def _timestamp(seconds: float) -> str:
     return datetime.fromtimestamp(seconds, timezone.utc).isoformat()
 
@@ -32,7 +45,8 @@ def evaluate_health(samples: dict, config: dict, *, motion_interval: float = 0.5
     minimum = config.get("battery_min_soc", 20)
     checks = {}
 
-    for source, interval in {**SOURCE_INTERVALS, "motion_state": motion_interval}.items():
+    intervals = {**SOURCE_INTERVALS, "motion_state": motion_interval, **config.get("intervals", {})}
+    for source, interval in intervals.items():
         sample = samples.get(source)
         limit = limits.get(source)
         item = {
@@ -74,17 +88,19 @@ def evaluate_health(samples: dict, config: dict, *, motion_interval: float = 0.5
             if isinstance(alarm, int) and not isinstance(alarm, bool) and alarm != 0:
                 item["status"] = "异常"
                 item["reasons"].append(f"电池报警码 {alarm}")
-        elif source == "imu" and not data.get("quaternion"):
+        elif source == "imu" and not valid_quaternion(data.get("quaternion")):
             item["status"] = "数据不足"
-            item["reasons"].append("IMU 四元数为空")
+            item["reasons"].append("IMU 四元数无效")
             continue
-        elif source == "joints" and len(data.get("joints") or []) != 21:
+        elif source == "joints" and not valid_joints(data.get("joints")):
             item["status"] = "数据不足"
             item["reasons"].append("关节读数未包含全部 21 个关节")
             continue
         elif source == "motion_state":
             workmode = data.get("workmode") or {}
-            if not data.get("fresh") or not isinstance(workmode, dict) or not workmode:
+            if (data.get("fresh") is not True or not isinstance(workmode, dict)
+                    or not isinstance(workmode.get("protection"), bool)
+                    or not isinstance(data.get("motor_faults"), list)):
                 item["status"] = "数据不足"
                 item["reasons"].append("运动状态读数无效")
                 continue
@@ -137,52 +153,3 @@ def evaluate_health(samples: dict, config: dict, *, motion_interval: float = 0.5
         "temperature_unassessed": unassessed,
         "unsupported": {"mainboard": "Bumi 驱动未提供独立主板状态数据"},
     }
-
-
-class HealthCheckPlugin:
-    PREFIX = "health_check"
-
-    def __init__(self, plugin_config: dict, state_plugin=None, motion_state_plugin=None):
-        self._config = plugin_config
-        self._state_plugin = state_plugin
-        self._motion_state_plugin = motion_state_plugin
-        minimum = plugin_config.get("battery_min_soc", 20)
-        if not isinstance(minimum, (int, float)) or isinstance(minimum, bool) or not math.isfinite(minimum) or not 0 <= minimum <= 100:
-            raise ValueError("health_check.battery_min_soc must be between 0 and 100")
-        limits = plugin_config.get("temperature_limits") or {}
-        if not isinstance(limits, dict) or any(
-            key not in ("battery", "joints") or not isinstance(value, (int, float))
-            or isinstance(value, bool) or not math.isfinite(value)
-            for key, value in limits.items()
-        ):
-            raise ValueError("health_check.temperature_limits must contain finite battery/joints limits")
-
-    def get_tool(self) -> dict:
-        return {
-            "name": "health_check", "type": "actuator", "multiInstance": False,
-            "description": "Read-only Bumi pre-operation report: battery, IMU, joints, protection mode and documented motor faults. Does not move or authorize movement.",
-            "inputSchema": {"type": "object",
-                            "properties": {"action": {"type": "string", "enum": ["check"],
-                                                      "description": "Generate a health report"}},
-                            "required": ["action"]},
-        }
-
-    def start(self) -> None:
-        pass
-
-    def stop(self) -> None:
-        pass
-
-    def dispatch(self, action: str, args: dict) -> dict | None:
-        if action in ("start", "info"):
-            return {"state": "ready"}
-        if action == "stop":
-            return {"state": "idle"}
-        if action == "check":
-            samples = self._state_plugin.health_snapshot() if self._state_plugin else {}
-            motion = self._motion_state_plugin.health_snapshot() if self._motion_state_plugin else None
-            if motion:
-                samples["motion_state"] = motion
-            interval = self._motion_state_plugin.poll_interval_s if self._motion_state_plugin else 0.5
-            return evaluate_health(samples, self._config, motion_interval=interval)
-        return None

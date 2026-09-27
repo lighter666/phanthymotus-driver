@@ -7,7 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from health_check import HealthCheckPlugin, evaluate_health
+from health_service.evaluator import evaluate_health
 
 
 NOW = 100.0
@@ -83,35 +83,3 @@ def test_configured_temperature_limit_and_missing_reading():
     value["battery"]["data"].pop("temperature")
     report = check(value, {"temperature_limits": {"battery": 60}})
     assert report["status"] == "数据不足"
-
-
-def test_plugin_lifecycle_and_no_hardware_actions():
-    import time
-
-    class State:
-        def health_snapshot(self):
-            result = samples()
-            for item in result.values():
-                item["received_monotonic"] = time.monotonic()
-            return {key: result[key] for key in ("battery", "imu", "joints")}
-
-    class Motion:
-        poll_interval_s = 0.5
-
-        def health_snapshot(self):
-            result = samples()["motion_state"]
-            result["received_monotonic"] = time.monotonic()
-            return result
-
-    plugin = HealthCheckPlugin({"battery_min_soc": 20}, State(), Motion())
-    assert plugin.get_tool()["inputSchema"]["properties"]["action"]["enum"] == ["check"]
-    assert plugin.dispatch("start", {}) == {"state": "ready"}
-    assert plugin.dispatch("check", {})["status"] == "正常"
-    assert plugin.dispatch("stop", {}) == {"state": "idle"}
-
-
-def test_invalid_thresholds_fail_at_startup():
-    with pytest.raises(ValueError):
-        HealthCheckPlugin({"battery_min_soc": 120})
-    with pytest.raises(ValueError):
-        HealthCheckPlugin({"temperature_limits": {"mainboard": 50}})

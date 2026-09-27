@@ -13,6 +13,6 @@ services:
       - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
       - FASTRTPS_DEFAULT_PROFILES_FILE=/opt/phanthy-motus/dds-local.xml
       - AGENT_CORE_URL=https://localhost:15678
-      - BUMI_MCP_URL=http://localhost:15704/mcp
+      - BUMI_MCP_URL=http://localhost:15741/mcp
       - MEETING_ENABLE_HEALTH_CHECK=0
     restart: always

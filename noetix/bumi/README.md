@@ -175,3 +175,7 @@ ros2 topic echo /<robot_namespace>/motion/state
 ros2 topic hz /<robot_namespace>/motion/state
 docker logs -f embodied-noetix-bumi
 ```
+
+## 独立健康检查
+
+health_check 已迁移到 [独立服务](../../demos/bumi-health-check/README.md)。它订阅本驱动现有状态话题，单独部署，不再作为 Bumi 驱动插件加载。
