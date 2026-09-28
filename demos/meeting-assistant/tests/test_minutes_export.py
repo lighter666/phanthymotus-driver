@@ -5,14 +5,14 @@ import threading
 import unittest
 import urllib.request
 import uuid
-from http.server import ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from minutes_export.service import MinutesStore
-from minutes_export.server import dispatch_rpc, handler
+from minutes_export.server import dispatch_rpc, handler, register_once
 
 
 class MinutesExportTests(unittest.TestCase):
@@ -124,6 +124,27 @@ class MinutesExportTests(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as error:
             urllib.request.urlopen(url + "/")
         self.assertEqual(error.exception.code, 404)
+
+    def test_registers_export_card_with_agent_core(self):
+        received = []
+
+        class CoreHandler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                received.append((self.path, json.loads(self.rfile.read(int(self.headers["Content-Length"])))))
+                body = b'{"code":200,"data":{"id":"mcp-test"}}'
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        core = ThreadingHTTPServer(("127.0.0.1", 0), CoreHandler)
+        worker = threading.Thread(target=core.serve_forever, daemon=True)
+        worker.start()
+        self.addCleanup(lambda: (core.shutdown(), core.server_close(), worker.join()))
+        result = register_once(f"http://127.0.0.1:{core.server_port}", 15742)
+        self.assertEqual(result, "mcp-test")
+        self.assertEqual(received, [("/api/mcp", {"name": "Bumi Meeting Minutes Export",
+                                                    "url": "http://127.0.0.1:15742/mcp", "category": "driver"})])
 
 
 if __name__ == "__main__":

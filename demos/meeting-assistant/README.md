@@ -28,7 +28,7 @@ curl -fsS http://127.0.0.1:15742/healthz
 
 构建默认复用 Bumi 已缓存的 `bj-warehouse.tencentcloudcr.com/phanthy-motus/ros-base:latest`。该容器没有 ROS 依赖、没有网页或下载接口，监听 `127.0.0.1:15742`；仅本机进程可访问，供同机 Agent Core 调用。目录挂载到容器内 `/data`，容器按 noetix 的 UID/GID 写入，因此 SSH 用户可直接读取。容器重启不删除宿主机文件。不要运行本目录旧的 `docker compose up`：那会启动已退役的 `meeting_manager` 服务。
 
-在 Agent Core 的 MCP 管理界面注册名称 `Bumi Meeting Minutes Export`、URL `http://localhost:15742/mcp`。确认其工具列表中出现 `meeting_minutes_export`，再将该卡片放到画布。旧 `meeting_manager` 和 `meeting_audio` 不恢复；独立 `health_check` 保持原状，只在主持人明确要求时调用。
+服务启动后会自动向同机 Agent Core 注册 `Bumi Meeting Minutes Export`，URL 为 `http://127.0.0.1:15742/mcp`，并定期续报；无需寻找手动注册页面。用 `docker logs meeting-minutes-export --tail 30` 核对 `[register] meeting_minutes_export id=...`，刷新画布工具列表，确认出现 `meeting_minutes_export` 后再将卡片放入画布。旧 `meeting_manager` 和 `meeting_audio` 不恢复；独立 `health_check` 保持原状，只在主持人明确要求时调用。
 
 更新同一 slug 的 Skill：
 

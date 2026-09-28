@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import ssl
+import threading
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -96,15 +99,49 @@ def handler(store):
     return Handler
 
 
+def register_once(core_url, port):
+    core_url = core_url.rstrip("/")
+    context = ssl._create_unverified_context() if core_url.startswith(("https://localhost:", "https://127.0.0.1:")) else None
+    payload = json.dumps({"name": "Bumi Meeting Minutes Export",
+                          "url": f"http://127.0.0.1:{port}/mcp", "category": "driver"}).encode("utf-8")
+    request = urllib.request.Request(core_url + "/api/mcp", payload,
+                                     {"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(request, timeout=5, context=context) as response:
+        result = json.load(response)
+    if result.get("code") != 200 or not isinstance(result.get("data", {}).get("id"), str):
+        raise RuntimeError(f"Agent Core MCP 注册失败：{result}")
+    return result["data"]["id"]
+
+
+def register_loop(core_url, port, stop):
+    while not stop.is_set():
+        try:
+            mcp_id = register_once(core_url, port)
+            print(f"[register] meeting_minutes_export id={mcp_id}", flush=True)
+            stop.wait(30)
+        except Exception as exc:
+            print(f"[register] {exc}", flush=True)
+            stop.wait(5)
+
+
 def main():
     directory = Path(os.environ.get("MEETING_EXPORT_DIR", "/data"))
     public_directory = Path(os.environ.get("MEETING_PUBLIC_DIR", "/home/noetix/meeting-minutes"))
     store = MinutesStore(directory, public_directory)
     server = ThreadingHTTPServer(("127.0.0.1", 15742), handler(store))
+    stop = threading.Event()
+    registration = None
+    if os.environ.get("REGISTER_AGENT_CORE", "1") == "1":
+        core_url = os.environ.get("AGENT_CORE_URL", "https://localhost:15678")
+        registration = threading.Thread(target=register_loop, args=(core_url, 15742, stop), daemon=True)
+        registration.start()
     try:
         server.serve_forever()
     finally:
+        stop.set()
         server.server_close()
+        if registration:
+            registration.join(timeout=2)
 
 
 if __name__ == "__main__":
