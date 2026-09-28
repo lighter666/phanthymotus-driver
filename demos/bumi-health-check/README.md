@@ -1,6 +1,6 @@
 # Bumi 独立健康检查服务
 
-此服务提供一张 health_check MCP 卡片，使用现有 Bumi 驱动发布的 ROS 状态。它没有机器人 SDK、ROS 发布器或运动控制客户端。无需替换、重启 Bumi 驱动镜像；会议 Skill 不调用它。
+此服务提供一张 health_check MCP 卡片，使用现有 Bumi 驱动发布的 ROS 状态。它没有机器人 SDK、ROS 发布器或运动控制客户端。无需替换、重启 Bumi 驱动镜像；会议 Skill 0.3.0 可在主持人要求会前检查时调用它。
 
 ## 数据与判定
 
@@ -47,7 +47,7 @@ docker compose logs --tail 60
 - URL：http://localhost:15741/mcp（Agent Core 与健康服务同机）
 - 如果 Agent Core 在另一台机器，URL 使用 http://192.168.55.101:15741/mcp
 
-刷新工具列表，选择这个独立服务下的 health_check 卡片，ACTION=check，手动执行。无需连接音频卡片，也不必把它接到会议 Agent 执行器。卡片在消息到达前会显示数据不足。
+刷新工具列表，选择这个独立服务下的 health_check 卡片，ACTION=check，可手动执行。若需要会议 Skill 调用，将 decision_core 底部执行器端口连到这张卡片；无需连接音频卡片。卡片在消息到达前会显示数据不足。
 
 直接检查接口：
 
