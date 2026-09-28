@@ -17,8 +17,10 @@ TOOL = {
     "name": "meeting_minutes_export", "type": "actuator", "multiInstance": False,
     "description": "把会议纪要草稿保存到 Bumi 本地 TXT；缺失的任务字段标为待确认，不派单。",
     "inputSchema": {
+        # Agent Core injects these into canvas calls before schema validation.
         "type": "object", "additionalProperties": False, "required": ["action"],
         "properties": {
+            "instance_id": {}, "_trace_id": {},
             "action": {"type": "string", "enum": ["save"]},
             "title": {"type": "string"}, "attendees": {"type": "array", "items": {"type": "string"}},
             "robot_status": {"type": "string"},
@@ -53,7 +55,9 @@ def dispatch_rpc(store, body):
         elif method == "tools/call":
             if params.get("name") != TOOL["name"] or not isinstance(params.get("arguments"), dict):
                 raise ValueError("unknown tool or invalid arguments")
-            value = store.dispatch(params["arguments"])
+            arguments = {key: value for key, value in params["arguments"].items()
+                         if key not in ("instance_id", "_trace_id")}
+            value = store.dispatch(arguments)
             result = {"content": [{"type": "text", "text": json.dumps(value, ensure_ascii=False)}]}
         else:
             return {"jsonrpc": "2.0", "id": request_id,

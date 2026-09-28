@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from minutes_export.service import MinutesStore
-from minutes_export.server import dispatch_rpc, handler, register_once
+from minutes_export.server import TOOL, dispatch_rpc, handler, register_once
 
 
 class MinutesExportTests(unittest.TestCase):
@@ -94,6 +94,20 @@ class MinutesExportTests(unittest.TestCase):
         wrong = dispatch_rpc(self.store, {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
                                           "params": {"name": "meeting_manager", "arguments": self.draft}})
         self.assertIn("error", wrong)
+
+    def test_agent_core_metadata_does_not_block_save(self):
+        # Agent Core adds these fields to canvas actuator calls.
+        self.assertFalse(TOOL["inputSchema"]["additionalProperties"])
+        self.assertIn("instance_id", TOOL["inputSchema"]["properties"])
+        self.assertIn("_trace_id", TOOL["inputSchema"]["properties"])
+        arguments = dict(self.draft, instance_id="meeting-card-1", _trace_id="trace-1")
+        saved = dispatch_rpc(self.store, {"jsonrpc": "2.0", "id": 6, "method": "tools/call",
+                                          "params": {"name": "meeting_minutes_export", "arguments": arguments}})
+        value = json.loads(saved["result"]["content"][0]["text"])
+        self.assertEqual(value["status"], "saved")
+        self.assertTrue(Path(value["path"]).is_file())
+        with self.assertRaises(ValueError):
+            self.store.save(dict(self.draft, save_path="/tmp/elsewhere"))
 
     def test_mcp_lifecycle_and_initialized_notification(self):
         self.assertIsNone(dispatch_rpc(self.store, {"jsonrpc": "2.0", "method": "notifications/initialized"}))
