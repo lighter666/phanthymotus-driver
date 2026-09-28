@@ -20,7 +20,10 @@ def samples():
         "imu": {"quaternion": [0, 0, 0, 1], "angular_vel": [0, 0, 0]},
         "joints": {"joints": [{"idx": i, "temp": 40 + i % 3} for i in range(21)]},
         "motion_state": {"fresh": True, "workmode": {"code": 2, "protection": False},
-                         "motor_faults": []},
+                         "motor_faults": [],
+                         "joint_states": [{"motor_id": i, "joint": f"joint_{i}",
+                                           "error": 0, "error_documented": True}
+                                          for i in range(21)]},
     }
     return {name: {"data": data, "received_monotonic": NOW - 0.01,
                    "received_at": WALL - 0.01} for name, data in readings.items()}
@@ -57,6 +60,30 @@ def test_protection_and_motor_faults_are_reported():
     report = check(value)
     assert report["status"] == "异常"
     assert len(report["checks"]["motion_state"]["reasons"]) == 2
+
+
+def test_undocumented_nonzero_motor_errors_are_not_reported_normal():
+    value = samples()
+    value["motion_state"]["data"]["joint_states"][4].update(
+        error=1, error_documented=False)
+    report = check(value)
+    assert report["status"] == "数据不足"
+    assert "未收录错误码" in report["checks"]["motion_state"]["reasons"][0]
+    assert "joint_4:1" in report["checks"]["motion_state"]["reasons"][0]
+
+
+def test_documented_fault_still_overrides_undocumented_code():
+    value = samples()
+    motion = value["motion_state"]["data"]
+    motion["motor_faults"] = [{"motor_id": 1, "error": 11}]
+    motion["joint_states"][4].update(error=1, error_documented=False)
+    assert check(value)["status"] == "异常"
+
+
+def test_missing_raw_motor_states_cannot_claim_normal():
+    value = samples()
+    del value["motion_state"]["data"]["joint_states"]
+    assert check(value)["checks"]["motion_state"]["status"] == "数据不足"
 
 
 def test_missing_and_stale_data_never_report_normal():

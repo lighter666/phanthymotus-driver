@@ -111,6 +111,25 @@ def evaluate_health(samples: dict, config: dict, *, motion_interval: float = 0.5
             if faults:
                 item["status"] = "异常"
                 item["reasons"].append(f"检测到 {len(faults)} 项已识别的电机故障")
+            joint_states = data.get("joint_states")
+            if not isinstance(joint_states, list) or len(joint_states) != 21:
+                if item["status"] == "正常":
+                    item["status"] = "数据不足"
+                item["reasons"].append("缺少完整的 21 个原始电机状态，无法核对未收录错误码")
+            else:
+                unknown = [joint for joint in joint_states
+                           if (isinstance(joint, dict)
+                               and type(joint.get("error")) is int
+                               and joint["error"] != 0
+                               and joint.get("error_documented") is not True)]
+                if unknown:
+                    if item["status"] == "正常":
+                        item["status"] = "数据不足"
+                    details = sorted({f'{joint.get("joint", joint.get("motor_id", "?"))}:'
+                                      f'{joint["error"]}' for joint in unknown})
+                    item["reasons"].append(
+                        f"{len(unknown)} 个电机报告未收录错误码（"
+                        + ", ".join(details) + "）；含义待核实")
 
         values = _temperatures(source, data)
         if values:
@@ -138,7 +157,7 @@ def evaluate_health(samples: dict, config: dict, *, motion_interval: float = 0.5
     overall = "异常" if "异常" in statuses else "数据不足" if "数据不足" in statuses else "正常"
     summary = {
         "异常": "已发现预设异常；请查看各项原因。",
-        "数据不足": "状态数据不完整或已过期，无法完成检查。",
+        "数据不足": "状态数据不完整、已过期或存在未判定错误码，无法完成检查。",
         "正常": "已启用的检查项未发现异常；这不是运动安全许可。",
     }[overall]
     unassessed = [source for source in ("battery", "joints")
