@@ -1,66 +1,78 @@
-# Bumi 会议纪要助手（Skill + 独立健康检查卡片）
+# Bumi 会议纪要助手：短语启动与本地 TXT 导出
 
-0.3.0 通过独立 `health_check` 卡片做会前 Bumi 检查，通过文字或现有 mic、asr 收集汇报，由 Agent 在当前对话中整理关键决策和五字段行动项。remote_message 用于文字汇报、纠正和确认。不需要运行自定义会议服务，不提供文件导出、可靠计时或跨会话任务跟进。当前平台不向 Agent 暴露 ASR 的 `stop`，因此 ASR 运行时只做文字纪要，不自动播报。
+0.4.0 使用现有 mic、ASR、Agent Core，加一张独立的 `meeting_minutes_export` MCP 卡片。主持人说“开始会议纪要”即可请求启动，随后再口述主题、参会人和汇报；说“汇报结束，请总结”后，Agent 保存 TXT 草稿到 Bumi 的 `/home/noetix/meeting-minutes/`。每项行动项记录负责人、截止时间、交付物、验收人、验收标准。缺失字段写“待确认”。文件不表示已派单或通知。
 
-## 更新安装
+## 在 Bumi 安装（先停止画布智能控制）
 
-在 Bumi 执行（先停止画布智能控制）：
+**真机测试前不要推送会议分支，也不要在 Bumi 上执行无法拉取的 `git pull`。**在电脑的本地会议目录中，先用 SSH/SCP 传这次实际需要的文件（交互式终端自行完成认证，不要在聊天中发送密码或私钥）：
 
-```bash
-cd ~/phanthymotus-driver-meeting
-git pull --ff-only
-cd demos/meeting-assistant
-sudo python3 scripts/install_local_skill.py
+```powershell
+cd <本机仓库>\demos\meeting-assistant
+ssh noetix@192.168.55.101 'mkdir -p ~/phanthymotus-driver-meeting/demos/meeting-assistant/minutes_export ~/phanthymotus-driver-meeting/demos/meeting-assistant/scripts ~/phanthymotus-driver-meeting/demos/meeting-assistant/tests'
+scp SKILL.md README.md Dockerfile.minutes-export compose.minutes-export.yaml noetix@192.168.55.101:~/phanthymotus-driver-meeting/demos/meeting-assistant/
+scp minutes_export/__init__.py minutes_export/service.py minutes_export/server.py noetix@192.168.55.101:~/phanthymotus-driver-meeting/demos/meeting-assistant/minutes_export/
+scp scripts/install_local_skill.py noetix@192.168.55.101:~/phanthymotus-driver-meeting/demos/meeting-assistant/scripts/
+scp tests/test_minutes_export.py tests/test_install_local_skill.py tests/check_container_persistence.py noetix@192.168.55.101:~/phanthymotus-driver-meeting/demos/meeting-assistant/tests/
 ```
 
-无需构建会议 Docker 镜像。脚本以同一个 slug meeting-full-cycle-assistant 覆盖更新，版本为 0.3.0，显示名为“会议纪要助手”；保留其他技能，并备份原 skills 配置行。刷新技能列表，再通过 remote_message 要求 Agent 先 deactivate_skill、再 activate_skill，标识均为 meeting-full-cycle-assistant。核对日志中加载的新指令：按需调用 health_check、五字段纪要、ASR 未确认停止时只做文字总结。
-
-## 画布调整
-
-停止智能控制后，先停止旧会议服务，再注销它在 Agent Core 中注册的 MCP。只处理旧会议服务，不影响独立的 `health_check` 服务及 Bumi 驱动：
+随后在 Bumi 的 SSH 终端运行：
 
 ```bash
 cd ~/phanthymotus-driver-meeting/demos/meeting-assistant
-docker compose down
-python3 scripts/remove_legacy_cards.py
-python3 scripts/remove_legacy_cards.py --apply
+mkdir -p /home/noetix/meeting-minutes
+chmod 700 /home/noetix/meeting-minutes
+printf 'MEETING_UID=%s\nMEETING_GID=%s\n' "$(id -u)" "$(id -g)" > .env.minutes-export
+docker compose --env-file .env.minutes-export -f compose.minutes-export.yaml up -d --build
+curl -fsS http://127.0.0.1:15742/healthz
 ```
 
-脚本只匹配名称为 `Bumi Meeting Assistant` 且 URL 为 `http://localhost:15740/mcp` 的注册项；第一遍只预览。`docker compose down` 不加 `-v`，脚本也不碰旧会议数据库。然后从当前画布删除 `meeting_manager`、`meeting_audio` 两个节点及连线，保存画布并刷新页面。仅删除画布节点不会注销工具列表里的旧卡片。旧服务代码和数据库保留供回退。
+构建默认复用 Bumi 已缓存的 `bj-warehouse.tencentcloudcr.com/phanthy-motus/ros-base:latest`。该容器没有 ROS 依赖、没有网页或下载接口，监听 `127.0.0.1:15742`；仅本机进程可访问，供同机 Agent Core 调用。目录挂载到容器内 `/data`，容器按 noetix 的 UID/GID 写入，因此 SSH 用户可直接读取。容器重启不删除宿主机文件。不要运行本目录旧的 `docker compose up`：那会启动已退役的 `meeting_manager` 服务。
+
+在 Agent Core 的 MCP 管理界面注册名称 `Bumi Meeting Minutes Export`、URL `http://localhost:15742/mcp`。确认其工具列表中出现 `meeting_minutes_export`，再将该卡片放到画布。旧 `meeting_manager` 和 `meeting_audio` 不恢复；独立 `health_check` 保持原状，只在主持人明确要求时调用。
+
+更新同一 slug 的 Skill：
+
+```bash
+cd ~/phanthymotus-driver-meeting/demos/meeting-assistant
+sudo python3 scripts/install_local_skill.py
+```
+
+脚本只改 Agent Core ConfigDB 中 `skills` 一行，保留其他 Skill，并生成原配置备份。版本应显示 0.4.0。列表中的 `active=true` 只是已启用；要在智能控制日志看到 `activate_skill({"slug":"meeting-full-cycle-assistant"})` 的**成功返回**，才能确认本轮激活。Skill 的 `oneLiner` 包含短口令，供激活前的 Agent Core 技能列表提示使用。语音路由能否稳定选择该 Skill 需要真机验证；失败时不能仅靠 Skill 指令宣称已解决。
+
+## 画布与口述流程
 
 ```text
-Bumi mic → ASR → decision_core
-remote_message → decision_core
-decision_core 底部执行器 → ASR
-decision_core 底部执行器 → TTS
-decision_core 底部执行器 → health_check
-TTS → Bumi speaker
+Bumi mic → ASR (trigger_mode=vad) → decision_core
+remote_message → decision_core  （文字测试与纠正）
+decision_core 底部执行器 → meeting_minutes_export
+decision_core 底部执行器 → health_check  （可选，仅按要求检查）
 ```
 
-ASR 设为 vad。独立 `health_check` 必须先部署并在 Agent Core 中注册；其画布卡片经执行器绿线连到 decision_core 后，Agent 才能用 `action: check` 调用。若卡片不可用，Skill 记录“未检查”。TTS 无需接入 meeting_audio；重新启动画布后检查 TTS 实际输出话题与 speaker 订阅一致，不沿用旧的 /meeting_assistant/announcements/tts。绿色画布连线本身不证明 Agent 可以调用 ASR 的 `stop`：2026-09-28 真机直接查询 Perception MCP，确认 `asr` 含有 `start/stop/info/config`；但 Agent Core 的 `mcp_client.all_schemas()` 会过滤 processor 的这些系统 action，所以 ASR 在 LLM 工具列表中完全消失，TTS 则因有 `speak` 而可见。0.3.0 要求 ASR 未确认停止时只给文字纪要，禁止播报，也不得声称 ASR 已停止。要让 Agent 自动暂停 ASR 再播报，需要平台新增受控的 ASR 生命周期接口，不能仅靠 Skill 或绿色连线完成。
+本版纪要不需要 TTS 和 speaker 连线。若其他用途仍保留 TTS，请避免在会议收听及总结期间调用它。停止智能控制后调整连线、保存，再重新开启。ASR 使用 `vad`，不是 `asr_kws`；对着麦克风说完整短语“开始会议纪要”，观察 ASR 数据流和 `activate_skill` 返回。若平台把短语识别出来却没有发起 `activate_skill`，记录为 Agent Core 语音路由限制，先用 `remote_message` 输入“请激活 meeting-full-cycle-assistant”完成其余演示。
 
-必须保留可用的 remote_message 入口供文字汇报、要求检查、纠正和确认。当前版本不能由 Agent 自动停止 ASR，文字总结后不得声称它已停止或需要恢复。若平台不允许两条数据线同时连接 decision_core，文字测试时切换到 remote_message；不要猜 ASR 的麦克风话题或创建重复实例。
+1. 说：“开始会议纪要。”等待日志里 `activate_skill` 成功，确认未调用 `health_check`、TTS，也未自发消息到 `/remote_control/message`。未说主题和人员时应显示“待确认”。
+2. 说：“主题是 Bumi 产品演示准备，参会人张三和李四。Bumi 还没检查。”然后口述：“张三在 2026 年 10 月 2 日 18 点北京时间前交付演示检查清单，李四验收；标准是麦克风转写、任务字段和语音播报三项都有测试结果。另需准备演示视频，负责人和验收标准未确定。”
+3. 说：“汇报结束，请总结。”检查 `meeting_minutes_export` 的 `save` 调用和返回的绝对路径。若没有成功返回，不得说文件已保存。确认演示视频缺失字段为“待确认”，纪要状态为草稿。
+4. 补充或纠正一项内容并要求“保存修订版纪要”；确认出现新文件且旧文件仍在。重复同样草稿应返回已有文件。
+5. 在 Bumi SSH 终端查看：`ls -lt /home/noetix/meeting-minutes/`，再用 `cat /home/noetix/meeting-minutes/指定文件名.txt` 核对内容。电脑上执行 `scp noetix@192.168.55.101:/home/noetix/meeting-minutes/指定文件名.txt .` 取回**指定**文件。
 
-## 演示话术
+可从 SSH 直接测试卡片本身：
 
-每一步等待 Agent 完成本轮操作，再输入下一步。
+```bash
+curl -sS http://127.0.0.1:15742/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+```
 
-1. 通过 remote_message 输入：“请激活 meeting-full-cycle-assistant，开始一次会议纪要演示，主题为产品演示准备，参会人张三和李四。请调用独立 health_check 卡片做一次会前检查，报告总体状态、检查时间、关键读数、异常或数据不足原因、未判定项。投影和网络待人工确认。只做文字纪要，不调用 TTS。”
-2. 口述或文字输入：“我是张三。我们决定先完成演示检查。张三在 2026 年 10 月 2 日 18 点北京时间前交付演示检查清单，李四验收，标准是麦克风转写、任务字段、语音播报三项都有测试结果。另有一项待办是准备演示视频，负责人和验收标准还没有确定。”测试时将截止日期换成合适的未来时间。
-3. 输入：“汇报结束，请只用文字总结，不调用 TTS。”检查决策、行动项、待确认问题和本次 Bumi 健康检查结果；第二项缺失字段不能擅自补齐。ASR 未确认停止时不得播报。
-4. 通过 remote_message 补充或纠正缺失字段，再要求更新文字纪要；若仍在语音收听模式，需现场确认 ASR 仍可收到内容，不假设它已停止或恢复。
-5. 输入：“我确认当前纪要。”只能标记对话内容已确认，不能声称已派单、入库或通知人员。
-
-新会话或重启后需要主持人重新提供背景。平台是否展示普通文字回复需现场确认；本版没有独立页面和下载文档。
-
-## 验证与已知阻塞
+## 测试、限制和回退
 
 ```bash
 python3 -m unittest discover -s tests -v
+docker compose --env-file .env.minutes-export -f compose.minutes-export.yaml ps
+python3 tests/check_container_persistence.py
+ls -lt /home/noetix/meeting-minutes/
 ```
 
-自动测试验证覆盖旧版本、清除旧会议工具依赖、重复安装、备份与保留其他技能。真机需验证独立 health_check 调用、状态如实记录、文字纪要字段和 ASR 语音输入。ASR 自动暂停/恢复与实际出声尚未通过验收。
+单元测试覆盖 UTF-8 内容、五字段缺失、无效输入、重复保存、修订另存和新服务实例读取同一目录。真机脚本自动写入独立测试草稿、重启导出容器、核对文件内容与幂等返回，通过后删除自己的测试文件；失败时保留文件供排查。真机还需验证麦克风转写、短语激活、TXT 路径及无 TTS 回声/输入话题自触发。本版不保证超长会议上下文完整，不提供后台提醒、自动派单和外部通知。
 
-此前日志显示 TTS 生成 23 帧音频，bumi_speaker 订阅正确，但 Bumi 未出声；该问题尚未解决。queued 或发布帧数都不能作为实际播报成功的证据。重接画布后仍无声时，保留新的 TTS 输出话题、ROS 订阅信息和 Bumi 播放日志，继续定位运行中的驱动；不要仅为此盲目更换镜像。
-
-旧会议服务仅保留供历史记录和回退使用，数据位置为 /opt/phanthy-motus/data/meeting-assistant/meetings.sqlite3；新版 Skill 不查询或更新它。回退时使用安装脚本生成的 skills 配置备份恢复对应技能，注意保留备份之后新增的其他技能，再重新激活旧技能及恢复旧画布。
+若需停用新卡片：先停止画布智能控制并移除执行器连线，再运行 `docker compose --env-file .env.minutes-export -f compose.minutes-export.yaml down`。不要加 `-v`；该命令不会删除 `/home/noetix/meeting-minutes/`。旧会议服务及 SQLite 数据仍保留供历史回退；不要误启动它。

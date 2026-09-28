@@ -1,0 +1,29 @@
+services:
+  meeting-minutes-export:
+    build:
+      context: .
+      dockerfile: Dockerfile.minutes-export
+    image: meeting-minutes-export:local
+    container_name: meeting-minutes-export
+    network_mode: host
+    user: "${MEETING_UID:?Set MEETING_UID in .env.minutes-export}:${MEETING_GID:?Set MEETING_GID in .env.minutes-export}"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      MEETING_EXPORT_DIR: /data
+      MEETING_PUBLIC_DIR: /home/noetix/meeting-minutes
+    volumes:
+      - type: bind
+        source: /home/noetix/meeting-minutes
+        target: /data
+        bind:
+          create_host_path: false
+    restart: unless-stopped
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "3"

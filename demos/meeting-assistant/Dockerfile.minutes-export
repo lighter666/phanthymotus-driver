@@ -1,0 +1,6 @@
+ARG ROS_BASE_IMAGE=bj-warehouse.tencentcloudcr.com/phanthy-motus/ros-base:latest
+FROM ${ROS_BASE_IMAGE}
+WORKDIR /work/meeting-minutes
+COPY minutes_export/ /work/meeting-minutes/minutes_export/
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+CMD ["python3", "-m", "minutes_export.server"]
