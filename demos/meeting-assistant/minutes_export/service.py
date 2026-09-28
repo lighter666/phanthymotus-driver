@@ -11,7 +11,7 @@ from pathlib import Path
 
 
 FIELDS = ("item", "owner", "deadline", "deliverable", "reviewer", "acceptance")
-ALLOWED = {"action", "title", "attendees", "robot_status", "decisions", "tasks", "pending"}
+ALLOWED = {"action", "title", "attendees", "presenters", "robot_status", "decisions", "tasks", "pending"}
 
 
 def _line(value, label):
@@ -44,12 +44,13 @@ def normalize(args):
     data = {
         "title": _line(args.get("title"), "title"),
         "attendees": _list(args.get("attendees"), "attendees"),
+        "presenters": _list(args.get("presenters"), "presenters"),
         "robot_status": _line(args.get("robot_status"), "robot_status"),
         "decisions": _list(args.get("decisions"), "decisions"),
         "tasks": normalized_tasks,
         "pending": _list(args.get("pending"), "pending"),
     }
-    if not any((data["title"] != "待确认", data["attendees"], data["decisions"], data["tasks"], data["pending"])):
+    if not any((data["title"] != "待确认", data["attendees"], data["presenters"], data["decisions"], data["tasks"], data["pending"])):
         raise ValueError("空纪要不能保存")
     return data
 
@@ -58,6 +59,7 @@ def render(data):
     lines = [
         "会议纪要草稿", "", f"会议主题：{data['title']}",
         f"参会人：{'、'.join(data['attendees']) if data['attendees'] else '待确认'}",
+        f"汇报人：{'、'.join(data['presenters']) if data['presenters'] else '待确认'}",
         "纪要状态：草稿", f"Bumi 健康检查：{data['robot_status']}", "",
         "关键决策：",
     ]

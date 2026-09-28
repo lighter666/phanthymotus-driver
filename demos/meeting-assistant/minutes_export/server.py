@@ -23,6 +23,7 @@ TOOL = {
             "instance_id": {}, "_trace_id": {},
             "action": {"type": "string", "enum": ["save"]},
             "title": {"type": "string"}, "attendees": {"type": "array", "items": {"type": "string"}},
+            "presenters": {"type": "array", "items": {"type": "string"}},
             "robot_status": {"type": "string"},
             "decisions": {"type": "array", "items": {"type": "string"}},
             "pending": {"type": "array", "items": {"type": "string"}},

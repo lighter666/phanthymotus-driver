@@ -49,7 +49,7 @@ def install(db_path: Path, skill_path: Path) -> tuple[str, Path | None]:
         "oneLiner": "听到‘开始会议纪要’时调用 activate_skill 激活本技能；结束后保存五字段 TXT 草稿",
         "instruction": instruction,
         "category": "robot",
-        "version": "0.5.0",
+        "version": "0.6.0",
         "author": "local",
         "installedAt": now,
         "active": True,

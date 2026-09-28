@@ -28,6 +28,7 @@ class MinutesExportTests(unittest.TestCase):
             "action": "save",
             "title": "Bumi 产品演示准备",
             "attendees": ["张三", "李四"],
+            "presenters": ["张三"],
             "robot_status": "未检查",
             "decisions": ["完成演示检查"],
             "tasks": [
@@ -44,6 +45,7 @@ class MinutesExportTests(unittest.TestCase):
         content = Path(result["path"]).read_text(encoding="utf-8")
         self.assertEqual(result["status"], "saved")
         self.assertIn("会议主题：Bumi 产品演示准备", content)
+        self.assertIn("汇报人：张三", content)
         self.assertIn("Bumi 健康检查：未检查", content)
         self.assertIn("关键决策：\n1. 完成演示检查", content)
         self.assertIn("负责人：张三", content)
@@ -70,6 +72,16 @@ class MinutesExportTests(unittest.TestCase):
         self.assertIn("负责人：待确认", Path(first["path"]).read_text(encoding="utf-8"))
         self.assertIn("负责人：李四", Path(second["path"]).read_text(encoding="utf-8"))
 
+    def test_unconfirmed_presenters_remain_pending(self):
+        draft = dict(self.draft, presenters=[], pending=["汇报人名单待确认"])
+        unconfirmed = self.store.save(draft)
+        content = Path(unconfirmed["path"]).read_text(encoding="utf-8")
+        self.assertIn("汇报人：待确认", content)
+        self.assertIn("汇报人名单待确认", content)
+        confirmed = self.store.save(self.draft)
+        self.assertNotEqual(unconfirmed["path"], confirmed["path"])
+        self.assertIn("汇报人：张三", Path(confirmed["path"]).read_text(encoding="utf-8"))
+
     def test_rejects_invalid_input_without_writing_or_accepting_path(self):
         bad = dict(self.draft, tasks="not a list")
         with self.assertRaises(ValueError):
@@ -78,6 +90,8 @@ class MinutesExportTests(unittest.TestCase):
             self.store.save(dict(self.draft, save_path="/tmp/elsewhere"))
         with self.assertRaises(ValueError):
             self.store.save(dict(self.draft, title="\x00bad"))
+        with self.assertRaises(ValueError):
+            self.store.save(dict(self.draft, presenters="张三"))
         self.assertFalse(self.output.exists())
 
     def test_mcp_returns_path_only_after_success_and_rejects_unknown_tool(self):

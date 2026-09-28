@@ -1,6 +1,6 @@
 # Bumi 会议纪要助手：短语启动与本地 TXT 导出
 
-0.5.0 使用现有 mic、ASR、Agent Core，加一张独立的 `meeting_minutes_export` MCP 卡片。主持人说“开始会议纪要”即可请求启动，随后再口述主题、参会人和汇报；汇报期间 Bumi 不说话。说“汇报结束，请总结”后，Agent 确认 ASR 已停止、保存 TXT 草稿，再经 TTS 播报一次总结。默认保存到 Bumi 的 `/home/noetix/meeting-minutes/`；若改过 Compose 挂载目录，以 `MEETING_PUBLIC_DIR` 为准。每项行动项记录负责人、截止时间、交付物、验收人、验收标准。缺失字段写“待确认”。文件不表示已派单或通知。
+0.6.0 使用现有 mic、ASR、Agent Core，加一张独立的 `meeting_minutes_export` MCP 卡片。主持人说“开始会议纪要”后先口述汇报人名单，Bumi 在会前语音复述并等待确认；正式汇报期间 Bumi 不说话。说“汇报结束，请总结”后，Agent 确认 ASR 已停止、保存 TXT 草稿，再经 TTS 播报一次总结。默认保存到 Bumi 的 `/home/noetix/meeting-minutes/`；若改过 Compose 挂载目录，以 `MEETING_PUBLIC_DIR` 为准。汇报人与普通参会人分开记录；每项行动项记录负责人、截止时间、交付物、验收人、验收标准。缺失字段写“待确认”。文件不表示已派单或通知。
 
 ## 在 Bumi 安装（先停止画布智能控制）
 
@@ -37,7 +37,7 @@ cd ~/phanthymotus-driver-meeting/demos/meeting-assistant
 sudo python3 scripts/install_local_skill.py
 ```
 
-脚本只改 Agent Core ConfigDB 中 `skills` 一行，保留其他 Skill，并生成原配置备份。版本应显示 0.5.0。列表中的 `active=true` 只是已启用；要在智能控制日志看到 `activate_skill({"slug":"meeting-full-cycle-assistant"})` 的**成功返回**，才能确认本轮激活。Skill 的 `oneLiner` 包含短口令，供激活前的 Agent Core 技能列表提示使用。语音路由能否稳定选择该 Skill 需要真机验证；失败时不能仅靠 Skill 指令宣称已解决。
+脚本只改 Agent Core ConfigDB 中 `skills` 一行，保留其他 Skill，并生成原配置备份。版本应显示 0.6.0。列表中的 `active=true` 只是已启用；要在智能控制日志看到 `activate_skill({"slug":"meeting-full-cycle-assistant"})` 的**成功返回**，才能确认本轮激活。Skill 的 `oneLiner` 包含短口令，供激活前的 Agent Core 技能列表提示使用。语音路由能否稳定选择该 Skill 需要真机验证；失败时不能仅靠 Skill 指令宣称已解决。
 
 ## 画布与口述流程
 
@@ -45,19 +45,20 @@ sudo python3 scripts/install_local_skill.py
 Bumi mic → ASR (trigger_mode=vad) → decision_core
 remote_message → decision_core  （文字测试与纠正）
 decision_core 底部执行器 → meeting_minutes_export
-decision_core 底部执行器 → ASR  （结束时调用 stop、info）
-decision_core 底部执行器 → TTS  （仅结束后调用 speak）
+decision_core 底部执行器 → ASR  （会前语音交替及结束时调用 stop、info、start）
+decision_core 底部执行器 → TTS  （会前提问/复述及结束后调用 speak）
 TTS 音频输出 → Bumi speaker
 decision_core 底部执行器 → health_check  （可选，仅按要求检查）
 ```
 
-**不要连接 `decision_core` 的紫色文本输出到 TTS 的 `TEXT` 输入**；这会把汇报期间每轮的“已记录”等文本直接播出。TTS 只接受结束后 Agent 通过绿色控制线发出的 `speak` 调用。停止智能控制后调整连线、保存，再重新开启。ASR 使用 `vad`，不是 `asr_kws`；对着麦克风说完整短语“开始会议纪要”，观察 ASR 数据流和 `activate_skill` 返回。若平台把短语识别出来却没有发起 `activate_skill`，记录为 Agent Core 语音路由限制，先用 `remote_message` 输入“请激活 meeting-full-cycle-assistant”完成其余演示。
+**不要连接 `decision_core` 的紫色文本输出到 TTS 的 `TEXT` 输入**；这会把汇报期间每轮的“已记录”等文本直接播出。TTS 只接受 Agent 通过绿色控制线在会前确认或会后总结时发出的 `speak` 调用。会前每次播报前先停止 ASR，等 TTS 的 ACP 完成后再启动 ASR；`queued` 不代表播报完成。若当前 Agent Core 无法确认 ACP 完成，则不要自动恢复 ASR，改由主持人在画布手动恢复并查看日志。停止智能控制后调整连线、保存，再重新开启。ASR 使用 `vad`，不是 `asr_kws`；对着麦克风说完整短语“开始会议纪要”，观察 ASR 数据流和 `activate_skill` 返回。若平台把短语识别出来却没有发起 `activate_skill`，记录为 Agent Core 语音路由限制，先用 `remote_message` 输入“请激活 meeting-full-cycle-assistant”完成其余演示。
 
-1. 说：“开始会议纪要。”等待日志里 `activate_skill` 成功，确认未调用 `health_check`、TTS，也未自发消息到 `/remote_control/message`。未说主题和人员时应显示“待确认”。
-2. 说：“主题是 Bumi 产品演示准备，参会人张三和李四。Bumi 还没检查。”然后口述：“张三在 2026 年 10 月 2 日 18 点北京时间前交付演示检查清单，李四验收；标准是麦克风转写、任务字段和语音播报三项都有测试结果。另需准备演示视频，负责人和验收标准未确定。”中途停顿数秒，核对没有 TTS 调用或机器人发声；ASR 分段不应触发总结。
-3. 说：“汇报结束，请总结。”检查 ASR `stop`、`info` 的原始返回，确认该实例为 `idle` 后，检查 `meeting_minutes_export` 的 `save` 调用、返回路径及随后**一次** TTS `speak`。若无法确认 ASR 已停止，就只保存文字、不播报；若未获得成功导出结果，不得说文件已保存。确认演示视频缺失字段为“待确认”，纪要状态为草稿。下一场语音会议前需重新启动 ASR。
-4. 补充或纠正一项内容并要求“保存修订版纪要”；确认出现新文件且旧文件仍在。重复同样草稿应返回已有文件。
-5. 在 Bumi SSH 终端查看：`ls -lt /home/noetix/meeting-minutes/`，再用 `cat /home/noetix/meeting-minutes/指定文件名.txt` 核对内容。电脑上执行 `scp noetix@192.168.55.101:/home/noetix/meeting-minutes/指定文件名.txt .` 取回**指定**文件。
+1. 说：“开始会议纪要。今天汇报人是张三和李四。”等待 `activate_skill` 成功。Bumi 应在 ASR `stop`→`info idle` 后复述名单，例如“我听到汇报人是张三和李四，请确认”；随后等待 TTS ACP 完成再调用 ASR `start`。没有名单时可先提问一次。确认没有调用 `health_check`，也没有向 `/remote_control/message` 自发消息。
+2. 等 Bumi 说完后，说：“确认汇报人，开始汇报。”如有错误，说“修改汇报人：张三和王五”，等待再次复述与确认。未确认的名单在最终 TXT 中必须是“待确认”。
+3. 说：“主题是 Bumi 产品演示准备，参会人张三和李四。Bumi 还没检查。”然后口述：“张三在 2026 年 10 月 2 日 18 点北京时间前交付演示检查清单，李四验收；标准是麦克风转写、任务字段和语音播报三项都有测试结果。另需准备演示视频，负责人和验收标准未确定。”中途停顿数秒，核对没有 TTS 调用或机器人发声；ASR 分段不应触发总结。
+4. 说：“汇报结束，请总结。”检查 ASR `stop`、`info` 的原始返回，确认该实例为 `idle` 后，检查 `meeting_minutes_export` 的 `save` 调用、返回路径及随后**一次** TTS `speak`。若无法确认 ASR 已停止，就只保存文字、不播报；若未获得成功导出结果，不得说文件已保存。确认 TXT 中单列“汇报人：张三、李四”、演示视频缺失字段为“待确认”、纪要状态为草稿。下一场语音会议前需重新启动 ASR。
+5. 补充或纠正一项内容并要求“保存修订版纪要”；确认出现新文件且旧文件仍在。重复同样草稿应返回已有文件。
+6. 在 Bumi SSH 终端查看：`ls -lt /home/noetix/meeting-minutes/`，再用 `cat /home/noetix/meeting-minutes/指定文件名.txt` 核对内容。电脑上执行 `scp noetix@192.168.55.101:/home/noetix/meeting-minutes/指定文件名.txt .` 取回**指定**文件。
 
 可从 SSH 直接测试卡片本身：
 
