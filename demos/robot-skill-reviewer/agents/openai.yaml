@@ -1,0 +1,4 @@
+interface:
+  display_name: "Robot Skill Reviewer"
+  short_description: "审查机器人 Skill 的独特性、通用性与执行闭环"
+  default_prompt: "使用 $robot-skill-reviewer 审查这份机器人 Skill，并给出准入结论和修改要求。"
