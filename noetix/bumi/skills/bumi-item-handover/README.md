@@ -24,6 +24,14 @@ python3 scripts/install_local_skill.py
 
 脚本默认更新 `/opt/phanthy-motus/data/data.db` 中的 `config.skills`；数据库路径不同时传 `--db /实际路径/data.db`。它先备份原 `skills` 配置，再按 `slug` 更新并重新读取验证，不更改其他 Skill。刷新 Skill 列表，停用旧版本并激活 `bumi-item-handover`。确认画布绑定的所有卡片能被执行器调用；配置中的 `active=true` 不代表当前 Agent 已重新加载指令。
 
+如果 Bumi 仍要求“请管理员确认”，先在 **Bumi 主机上的这份最新目录**运行只读检查：
+
+```bash
+python3 scripts/install_local_skill.py --check
+```
+
+期望看到 `版本=2.0.1`、`与本目录 SKILL.md 一致：是`、`包含旧版管理员提问：否`、`其他激活的管理员版借还 Skill：无`。检查失败时，重新运行上面的安装命令，再刷新 Skill 列表、重新激活，并在**新对话**中测试；旧对话历史可能继续带入过去的管理员话术。只把本目录的 `SKILL.md` 安装到 Bumi，不要使用旧版副本。若检查通过而新对话仍要求管理员，再核对是否有画布提示词或其他 Skill 注入了旧流程。GitHub 分支更新本身不会自动更新 Bumi 数据库。
+
 ## 自助使用示例
 
 借出时，借还人可以说：

@@ -12,6 +12,7 @@ from pathlib import Path
 
 
 SLUG = "bumi-item-handover"
+VERSION = "2.0.1"
 DEFAULT_DB = Path("/opt/phanthy-motus/data/data.db")
 DEFAULT_SKILL = Path(__file__).resolve().parents[1] / "SKILL.md"
 
@@ -48,7 +49,7 @@ def install(db_path: Path, skill_path: Path) -> tuple[str, Path | None]:
         "oneLiner": "自助核对人员、物品和配件，拍照记录差异",
         "instruction": instruction,
         "category": "robot",
-        "version": "2.0.0",
+        "version": VERSION,
         "author": "local",
         "installedAt": now,
         "active": True,
@@ -110,11 +111,49 @@ def install(db_path: Path, skill_path: Path) -> tuple[str, Path | None]:
     return ("updated" if current else "installed"), backup
 
 
+def check_install(db_path: Path, skill_path: Path) -> None:
+    """Read-only check that Agent Core stores this exact self-service Skill."""
+    if not db_path.is_file():
+        raise FileNotFoundError(f"Agent Core 数据库不存在：{db_path}")
+    _, expected_instruction = read_skill(skill_path)
+    with closing(sqlite3.connect(f"file:{db_path.as_posix()}?mode=ro", uri=True)) as conn:
+        row = conn.execute("SELECT value FROM config WHERE key='skills'").fetchone()
+    settings = json.loads(row[0]) if row and row[0] else {"installed": []}
+    if not isinstance(settings, dict) or not isinstance(settings.get("installed"), list):
+        raise ValueError("skills 配置格式不正确")
+    matches = [item for item in settings["installed"]
+               if isinstance(item, dict) and item.get("slug") == SLUG]
+    if len(matches) != 1:
+        raise RuntimeError(f"数据库中应有 1 个 {SLUG}，实际找到 {len(matches)} 个")
+    current = matches[0]
+    instruction = current.get("instruction", "")
+    same_instruction = instruction == expected_instruction
+    old_prompt = any(phrase in instruction for phrase in (
+        "请管理员", "由管理员确认", "管理员负责", "待管理员处理",
+    ))
+    print(f"数据库 Skill：{SLUG} 版本={current.get('version', '未知')} active={current.get('active')}")
+    print(f"与本目录 SKILL.md 一致：{'是' if same_instruction else '否'}")
+    print(f"包含旧版管理员提问：{'是' if old_prompt else '否'}")
+    conflicting = [str(item.get("slug") or "无 slug") for item in settings["installed"]
+                   if isinstance(item, dict) and item.get("slug") != SLUG
+                   and item.get("active") is True
+                   and "借还" in (str(item.get("name", "")) + str(item.get("description", "")))
+                   and "请管理员" in str(item.get("instruction", ""))]
+    print(f"其他激活的管理员版借还 Skill：{', '.join(conflicting) if conflicting else '无'}")
+    if current.get("version") != VERSION or current.get("active") is not True \
+            or not same_instruction or old_prompt or conflicting:
+        raise RuntimeError("Bumi 数据库仍存在旧版借还指令；请更新当前 Skill，并停用冲突的旧借还 Skill")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="本地安装 Bumi 办公物品借还 Skill")
     parser.add_argument("--db", type=Path, default=DEFAULT_DB)
     parser.add_argument("--skill", type=Path, default=DEFAULT_SKILL)
+    parser.add_argument("--check", action="store_true", help="只读核对数据库是否启用本目录的自助版 Skill")
     args = parser.parse_args()
+    if args.check:
+        check_install(args.db, args.skill)
+        return
     status, backup = install(args.db, args.skill)
     print(f"{status}: {SLUG}")
     if backup:
