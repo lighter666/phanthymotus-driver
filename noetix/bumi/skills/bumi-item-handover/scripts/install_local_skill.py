@@ -43,12 +43,12 @@ def install(db_path: Path, skill_path: Path) -> tuple[str, Path | None]:
     now = dt.datetime.now().astimezone().isoformat(timespec="seconds")
     template = {
         "slug": SLUG,
-        "name": "Bumi 办公物品借还现场核验",
+        "name": "Bumi 办公物品借还自助核验",
         "description": description,
-        "oneLiner": "识别借用人，借助 OCR/VOP 核对物品并拍照留证",
+        "oneLiner": "自助核对人员、物品和配件，拍照记录差异",
         "instruction": instruction,
         "category": "robot",
-        "version": "1.2.0",
+        "version": "2.0.0",
         "author": "local",
         "installedAt": now,
         "active": True,

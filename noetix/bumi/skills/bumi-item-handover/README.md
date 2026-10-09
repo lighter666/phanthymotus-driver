@@ -1,73 +1,61 @@
-# Bumi 办公物品借还现场核验
+# Bumi 办公物品借还自助核验
 
-此 Skill 用 Bumi 相机和现有 `face_recognition` 卡片识别借用人候选，用 `ocr` 读取可见资产标签文字、`vop` 辅助识别物品类别，再用 `vision_capture` 拍摄借还交接现场。管理员确认人脸候选、资产编号和配件核对结果，检查实物与原图，最后把交接摘要录入正式台账。Skill 不维护借还数据库，也不自动解码二维码。
+Bumi 主持借还流程：识别人脸并比对借还人自报信息，用 OCR 读取资产标签、VOP 核对受支持的物品类别，引导逐项展示配件，再用 `vision_capture` 保存现场照片。借还人无需等待管理员；识别结果不一致时，Bumi 复核一次并询问其是否确认差异、仍请求继续。确认答复会记入摘要，**不会消除识别冲突**。
 
-## 前置条件
+这是现场核验与留证 Skill，不是正式借还台账。它不能跨会话查历史、自动解码二维码、判断设备功能、证明保管方已实际接收物品，或仅凭同型号外观确认资产编号。借出基线若由借还人提供，摘要会标明来源；归还应提供原借出摘要或记录，否则不能报告“与借出时相符”。
 
-- Bumi 的 PhanthyMotus 画布上已提供 `vision_capture` 工具；在卡片上执行 `start` 应返回 `state=ready`。其 `capture_photo` 成功时返回 `ok=true`、`file_path` 和 `captured_at`。
-- 画布上有 Bumi 的 `camera` 卡片，以及感知服务的 `face_recognition`、`ocr`、`vop` 卡片。人脸卡片支持 `recognize_by_stream`，且预先录入了要识别的员工。未注册或未命名的人脸不能自动当作借用人。
-- `ocr` 和 `vop` 已加载各自模型，能够接收同一 Bumi 相机的新画面。`vop` 仅支持模型内固定的类别；部署前在卡片执行 `list_recognizable_objects`，确认目标物品类别是否在列表中。
-- 操作者可以在 Bumi 主机打开照片。默认目录为 `/opt/phanthy-motus/data/vision_capture/photos/`，实际以卡片返回的路径为准。
-- 管理员在场，拥有原借出记录或借出时的配件清单，负责实物交接和正式台账登记。
+## 前置条件与画布连接
 
-## 画布连接与卡片准备
+- Bumi 画布已提供 `camera`、`vision_capture`，感知服务已提供 `face_recognition`、`ocr`、`vop`。`vision_capture.start` 返回 `state=ready`，`capture_photo` 成功时返回 `ok=true`、非空 `file_path` 和 `captured_at`。
+- 预先征得员工同意并录入人脸库，录入时使用 `register_by_photo` 和真实姓名；借还 Skill 只执行只读的 `recognize_by_stream`，不自动注册。未经录入、未命名或质量差的人脸不能作为已识别人员。
+- 停止智能控制后，将 Bumi `camera` 图像输出分别连到 `face_recognition`、`ocr`、`vop`，把三个结果输出分别连到 `decision_core`；`decision_core` 底部执行器端口连到这三个感知卡片和 `vision_capture`。保留 `remote_message → decision_core` 作为文字输入。`vision_capture` 使用 Bumi 驱动内部相机，无需从感知卡片接入图像。
+- 在 `vop` 卡片执行 `list_recognizable_objects`，确认目标类别在固定词表中。没有目标类别时只能依赖标签和借还人陈述，不能说 VOP 已识别该物品。[VOP 源码](https://github.com/4paradigm/phanthymotus/blob/main/perception/plugins/vop.py)
+- 在卡片检查 OCR/VOP 正接收 Bumi 相机的新画面。OCR 结果包含 `text`、`items`、`timestamp`；VOP 结果包含 `objects`、`timestamp`。不要把 `vision_capture` 返回的本机路径直接交给 OCR/VOP 的 `recognize_by_photo`；感知服务与 Agent Core 可能不共享文件系统。[OCR 源码](https://github.com/4paradigm/phanthymotus/blob/main/perception/plugins/ocr.py)
 
-停止智能控制后，从 Bumi `camera` 的图像输出分别连到 `face_recognition`、`ocr`、`vop` 的图像输入；再把这三个卡片的结果输出分别连到 `decision_core` 的感知输入。`decision_core` 底部执行器端口分别连接 `face_recognition`、`ocr`、`vop` 与 `vision_capture`，以便按需调用卡片动作。保留现有 `remote_message → decision_core` 作为文字输入。使用 Bumi 的 `camera`，不要把 Agent Core 的 `remote_camera` 当成机器人相机。`vision_capture` 复用 Bumi 驱动内部相机画面，无需从其他卡片接收图像数据。
-
-OCR 与 VOP 使用**实时相机流**核对交接物品；`vision_capture` 保存交接照片。不要直接把 `vision_capture` 返回的本机 `file_path` 填给 OCR/VOP 的 `recognize_by_photo`：感知服务与 Agent Core 所在容器未必共享文件系统，该动作的 `image_path` 在感知服务端必须可读。先在各卡片确认 `start`/`info` 状态、输入为 Bumi 相机、结果时间晚于本次物品摆放时间。OCR 输出包含 `text`、`items`、`timestamp`；VOP 输出包含 `objects` 与 `timestamp`。无新结果时先排查连线和模型状态，不把旧画面用于交接。相关动作与字段见[平台 OCR 源码](https://github.com/4paradigm/phanthymotus/blob/main/perception/plugins/ocr.py)、[VOP 源码](https://github.com/4paradigm/phanthymotus/blob/main/perception/plugins/vop.py)。
-
-先获得被录入人的同意，再在 `face_recognition` 卡片以单人清晰照片执行 `register_by_photo`，填写真实姓名并核对返回 `ok=true`、`person_id`。注册是单独的管理员操作，借出 Skill 不自动注册人员。识别前确认卡片已加载、接收 Bumi 相机画面；在卡片上手动执行 `recognize_by_stream`，应得到 `ok=true` 和 `faces`。只有一张 `known=true`、`quality=ok`、姓名非空的人脸，才可作为借用人候选，仍需管理员确认。
-
-当前平台的持续人脸流在识别陌生人时可能保留未命名身份与到访记录；只在现场人员知情的测试场景启用，并在测试结束后停止该卡片。若不希望产生这类记录，不要启动持续人脸流。`recognize_by_stream` 本身是只读查询。[平台人脸卡片说明](https://github.com/4paradigm/phanthymotus/blob/main/perception/README.md)
+平台持续人脸流可能为陌生人保留未命名身份及到访记录，启用前应让现场人员知情；结束测试后停止不再需要的卡片。`recognize_by_stream` 查询本身不注册人员。[人脸卡片说明](https://github.com/4paradigm/phanthymotus/blob/main/perception/README.md)
 
 ## 安装与启用
 
-将整个目录复制到 Bumi 主机，在主机上运行：
+将整个目录复制到 Bumi 主机，在目录内运行：
 
 ```bash
 python3 scripts/install_local_skill.py
 ```
 
-脚本默认操作 `/opt/phanthy-motus/data/data.db` 的 `config.skills` 行。它先在数据库同目录生成 `skills-row-backup-bumi-item-handover-*.json`，再按 `slug` 安装或更新，并重新读取核对。数据库路径不同时使用 `--db /实际路径/data.db`。安装过程不会调用相机或改变机器人状态。
+脚本默认更新 `/opt/phanthy-motus/data/data.db` 中的 `config.skills`；数据库路径不同时传 `--db /实际路径/data.db`。它先备份原 `skills` 配置，再按 `slug` 更新并重新读取验证，不更改其他 Skill。刷新 Skill 列表，停用旧版本并激活 `bumi-item-handover`。确认画布绑定的所有卡片能被执行器调用；配置中的 `active=true` 不代表当前 Agent 已重新加载指令。
 
-刷新平台 Skill 列表，先停用旧版本（如已激活），再激活 `bumi-item-handover`。确认执行器能调用画布绑定的 `ocr`、`vop` 和 `vision_capture`；`active=true` 只说明配置项已启用，不证明当前 Agent 已加载新指令。
+## 自助使用示例
 
-## 现场话术
+借出时，借还人可以说：
 
-借出：
+> 我要借出笔记本，自报姓名张三，资产编号 LT-023，配件是电源适配器和电脑包，预计 2026 年 10 月 12 日 18:00 北京时间归还。我同意人脸识别，会按提示展示标签和配件。请核对并拍照。
 
-> 请激活 bumi-item-handover。现在借出笔记本，资产编号 LT-023，配件是电源适配器和电脑包，预计 2026 年 10 月 12 日 18:00 北京时间归还。借用人已同意人脸识别，请先识别镜头前的借用人；我会把设备标签和配件摆到镜头前，请用 OCR 读标签、用 VOP 辅助识别物品类别，再引导我核对并拍照。我会确认识别结果和实物交付。
+归还时，借还人应给出原记录：
 
-归还：
+> 我要归还 LT-023，自报姓名张三。原借出摘要记录笔记本和电源适配器、电脑包，摘要来源是上次 Bumi 对话。我同意人脸识别，请引导我展示物品并核对。
 
-> 现在归还 LT-023。原借出记录是我提供的交接摘要，其中配件为电源适配器和电脑包。我会展示标签、主设备和配件；请用 OCR/VOP 辅助核对，再引导我逐项确认、拍照，并等待我确认已经接收。
-
-每一步完成后再给下一条消息。拍照后管理员须打开原图，确认标签、主设备和配件都清晰；如有遮挡，明确要求重拍。示例日期只作演示，实际归还时间由管理员提供。
+若 Bumi 报告“人脸识别为李四，但自报张三”或“标签 LT-032，与所报 LT-023 不同”，借还人需要明确说明是否确认这个差异并继续。即使答“确认”，结果仍为“存在差异”；可继续留证，但不会变成正常匹配。照片保存后，借还人可在 Bumi 主机打开原图检查。默认照片目录为 `/opt/phanthy-motus/data/vision_capture/photos/`，以卡片实际返回路径为准。
 
 ## 验收清单
 
 | 场景 | 预期结果 |
 | --- | --- |
-| 正常借出、归还 | 照片有实际路径，管理员确认后才报告交接或核对相符 |
-| 单人已注册 | 返回姓名和 person_id，管理员确认后才填入借用人 |
-| 多人、陌生人、低质量或无画面 | 不擅自选择借用人；可调整站位重试或由管理员提供姓名 |
-| 人脸结果与管理员核对不符 | 标注识别结果不符，不把错误候选写成已识别借用人 |
-| OCR 读出完整标签 | 逐字复述供管理员对照，管理员确认后才写入资产编号 |
-| OCR 看不清、读错或读到邻近标签 | 标注未确认或冲突，请管理员调整画面并核对实物；不猜编号 |
-| VOP 检出支持的类别 | 记录类别和置信度，管理员仍需确认主设备及资产编号 |
-| VOP 不支持该类别或未检出 | 明确说明检测局限，不把未检出当作物品不存在 |
-| 同型号错物或 OCR/VOP 与管理员所报冲突 | 按实际标签由管理员复核，未解决前不报告核对相符 |
-| 少还配件、错物或外观差异 | 逐项列出差异，不报告正常归还 |
-| 标签不清或照片模糊 | 不推断物品身份或画面合格；管理员要求后再拍 |
-| 没有原借出记录 | 可以留现场照片，但不宣称与借出时相符 |
-| 相机未就绪或拍照失败 | 不报告照片已保存，保留工具错误信息 |
-| 拍照后交接中止 | 标注未完成交接；实物已交付则单独报告实际状态 |
-| 重复安装 | 同一 `slug` 仅一项，其他 Skill 原样保留；无变化时不再生成备份 |
+| 人脸姓名、标签编号与类别一致 | 列出逐项证据，只表述“与提供的基线一致” |
+| 无人脸、多张人脸或质量差 | 调整后重试一次；仍失败则标为人员未通过视觉核验 |
+| 人脸与自报姓名不符 | 向借还人确认差异；确认继续也保留人员冲突 |
+| OCR 编号与所报编号不同 | 复核一次，保留差异；不能按 VOP 类别一致就放行成“相符” |
+| 标签不清、错读邻近标签 | 不猜编号，标明未识别或未关联 |
+| VOP 不支持目标类别或未检出 | 标明类别未验证，不把未检出当成物品不存在 |
+| 配件未入画或无法识别 | 与视觉检出项分开，记录借还人自述，不称 Bumi 已核对齐全 |
+| 归还没有原借出记录 | 可拍照记录，但不得报告与借出时相符 |
+| 照片模糊或保存失败 | 不宣称原图已核实；无成功回执时写照片未取得 |
+| 借还人拒绝确认差异或中止 | 停止正常核验，摘要反映已发生的事实 |
+| 重复安装 | 同一 `slug` 仅一项，其他 Skill 保留；配置不变时不再备份 |
 
-本地验证安装逻辑：
+本地安装逻辑测试：
 
 ```bash
 python3 -m unittest discover -s tests -v
 ```
 
-自动测试仅验证安装和配置保留；借还话术、相机回执、原图质量与现场交接需要在 Bumi 上人工验收。
+自动测试不代替 Bumi 实机的相机、模型、照片与现场流程验收。
