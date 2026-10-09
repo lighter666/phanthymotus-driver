@@ -1,16 +1,26 @@
 # Bumi 办公物品借还自助核验
 
-Bumi 每次只提示借还人完成**当前一步**，等回答或工具结果返回后再继续：确认借出/归还与基线 → 人脸核对 → OCR 读取资产标签 → 逐件确认配件与外观 → 拍照 → 确认取走/放回 → 输出摘要。全过程直接面向借还人，不询问管理员。
+此 Skill 只保留两条顺序明确的流程。Bumi 每次只提示当前动作，已获得的信息不再重复询问；异常在当前阶段复核一次并记录，不追加一轮通用核验。
 
-本版不使用 VOP。Bumi 可以通过 OCR 比对清晰可见的资产编号，但不能自动识别主设备类别、无标签配件或设备功能。物品名称、配件、外观由借还人逐项确认，并在摘要中标明来源。识别不一致时，Bumi 复核一次，再询问借还人是否确认差异并仍要继续；答“确认”也保留差异，不会变成核对相符。此 Skill 不查询跨会话台账，也不代表正式借还登记或保管方实际接收。
+| 借出 | 归还 |
+| --- | --- |
+| OCR 读取资产标签 → 一次确认配件 → 人脸识别并确认姓名 → 拍照 → 摘要 | OCR 读取归还标签 → 人脸识别并确认姓名 → 一次确认配件 → 摘要 |
 
-## 画布连接
+归还不拍照。没有原借出记录时仍可完成现场记录，但摘要必须写“缺少借出基线，无法判断是否正常归还”。没有 VOP，Bumi 不能自动识别物品类别或无标签配件；配件状态来自借还人的逐项陈述。借还人确认差异不等于差异消失。此 Skill 不查询跨会话台账，也不证明正式登记或保管方实际接收。
 
-- 需要 Bumi 的 `camera`、`vision_capture` 和感知卡片 `face_recognition`、`ocr`。从 Bumi `camera` 的图像输出分别连到人脸卡片与 OCR 卡片；把两张卡片的结果分别连到 `decision_core` 感知输入。
-- 从 `decision_core` 底部执行器端口分别连到 `face_recognition`、`ocr`、`vision_capture`，以便按需调用动作。保留 `remote_message → decision_core` 的文字输入。`vision_capture` 使用 Bumi 驱动内部相机，无需从其他卡片接图像。
-- 旧画布上的 VOP 卡片及其连线可移除；本 Skill 的 `requiredTools` 已不包含 `vop`。若其他流程仍用 VOP，只需确保它不参与本次借还流程。
-- 人脸库应事先经本人同意录入真实姓名。录入使用 `register_by_photo`；本 Skill 只使用只读的 `recognize_by_stream`，不会自动注册人员。[人脸卡片说明](https://github.com/4paradigm/phanthymotus/blob/main/perception/README.md)
-- OCR 使用实时相机结果中的 `text`、`items`、`timestamp`。不要直接把 `vision_capture` 返回的本机照片路径传给 OCR 的 `recognize_by_photo`；感知服务与 Agent Core 可能不共享文件系统。[OCR 卡片源码](https://github.com/4paradigm/phanthymotus/blob/main/perception/plugins/ocr.py)
+## 画布与直接调用
+
+- 保留 Bumi `camera → ocr → decision_core` 和 `camera → face_recognition → decision_core` 的图像与结果连线；`decision_core` 底部执行器端口连到 `ocr`、`face_recognition`、`vision_capture`。保留原有文字/语音输入。`vision_capture` 使用 Bumi 驱动内部相机。
+- 借出和归还展示标签后均调用 **`ocr(action="start", input_topic=画布实际连接的相机话题)`**，然后等待本次展示后的新 OCR 流结果 `text/items/timestamp`；`start` 的返回值不是识别出的文字。使用画布绑定实例与实际话题，不猜话题、也不省略它；无话题的 `start` 可能只进入单张图片按需模式。同一交接不重复启动 OCR。[OCR 卡片源码](https://github.com/4paradigm/phanthymotus/blob/main/perception/plugins/ocr.py)
+- 人脸阶段在借还人同意且面向相机后调用 **`face_recognition(action="recognize_by_stream")`**。它是只读识别；Skill 不调用 `register_*`。人脸库需事先经本人同意录入真实姓名。[人脸卡片说明](https://github.com/4paradigm/phanthymotus/blob/main/perception/README.md)
+- **仅借出**在准备好画面后调用 **`vision_capture(action="start")`**；就绪后调用 **`vision_capture(action="capture_photo")`**。只有成功回执含非空 `file_path` 才写“照片已保存”。归还分支不调用此卡片。
+- VOP 不参与本 Skill，`requiredTools` 只有 `camera`、`ocr`、`face_recognition`、`vision_capture`。旧画布上的 VOP 连线可移除；若其他流程仍需要它，可保留独立使用。
+
+## 示例对话节奏
+
+借还人说“我要借出”，Bumi 才提示“请把资产标签对准相机”。读到编号后只问“识别到 LT-023，对吗？”；确认后再问一次配件清单；随后提示面向镜头做人脸识别；最后提示摆好物品拍照并输出摘要。借还人说“我要归还”时按表中归还顺序走，到配件回答后直接输出摘要。
+
+已在开场提供的姓名、资产编号、配件或原记录直接使用，不重复追问。物品名称、预计归还时间、外观和实际取走/放回状态未提供时写“待补”；不为补齐它们增加阶段。OCR 读不清、编号不符、识别姓名被否认或配件冲突时，只在当前阶段重试一次；若仍冲突，问借还人是否确认差异并继续，摘要仍标记异常。说“取消”立即停止后续调用。
 
 ## 安装与检查
 
@@ -21,44 +31,20 @@ python3 scripts/install_local_skill.py
 python3 scripts/install_local_skill.py --check
 ```
 
-脚本默认更新 `/opt/phanthy-motus/data/data.db` 的 `config.skills`；路径不同可用 `--db /实际路径/data.db`。安装前会备份原 `skills` 配置，并按 `slug` 更新，不更改其他 Skill。`--check` 只读核对数据库，期望显示 `版本=2.1.0`、`与本目录 SKILL.md 一致：是`、`包含旧版管理员提问：否`、`其他激活的管理员版借还 Skill：无`。
-
-刷新 Skill 列表，停用旧版本、激活当前 `bumi-item-handover`，在**新对话**中测试。只把本目录的 `SKILL.md` 安装到 Bumi；GitHub 分支更新不会自动更新 Bumi 数据库。若检查通过却仍听到旧话术，还需检查画布提示词或其他激活的 Skill。
-
-## 借还人体验
-
-开场只需说“我要借出物品”或“我要归还物品”。Bumi 将按顺序提示：
-
-| 步骤 | Bumi 的一句提示示例 | 等待的输入 |
-| --- | --- | --- |
-| 基线 | “请说物品名称。”随后单独询问资产编号、配件、预计归还时间或原记录 | 每个字段一次回答 |
-| 人员 | “请说你的姓名。”随后询问人脸识别同意，再提示单人面向相机 | 姓名、同意、准备完成 |
-| 标签 | “请把资产标签正对相机，准备好后说完成。” | 新 OCR 结果 |
-| 配件 | “请展示电源适配器，回答有、缺少或不确定。” | 逐件回答 |
-| 外观 | “外观有划痕或破损吗？” | 具体说明或“没有” |
-| 照片 | “请摆好物品和配件，准备好后说拍照。” | 拍照指令及保存回执 |
-| 交接 | “你已经取走/放回物品了吗？” | 明确回答，然后输出摘要 |
-
-借还人可随时说“重试”“跳过”“取消”。如果 Bumi 提示姓名或编号冲突，应先重试识别；仍冲突时借还人可以明确确认差异并要求继续留证，摘要仍标记异常。归还时应提供原借出摘要或记录，缺少基线不能报告正常归还。照片默认保存在 `/opt/phanthy-motus/data/vision_capture/photos/`，以卡片返回的实际路径为准；保存回执不证明原图清晰。
+脚本默认操作 `/opt/phanthy-motus/data/data.db` 的 `config.skills`，会先备份旧配置、按同一 `slug` 更新，并重新读取验证；其他 Skill 保持不变。数据库在别处时使用 `--db /实际路径/data.db`。检查应显示 `版本=2.2.0`、`与本目录 SKILL.md 一致：是`、`包含旧版管理员提问：否`。刷新并重新激活 Skill，在新对话中测试。推送 GitHub 分支不会自动修改 Bumi 数据库。
 
 ## 验收
 
 | 场景 | 预期结果 |
 | --- | --- |
-| 正常借出、归还 | 一次只提示一个动作，逐步等待回答；摘要分开标明机器结果和借还人确认 |
-| 已给出部分信息 | 不重复询问已知字段，仍按顺序指导展示和拍照 |
-| 人脸未知、多人或姓名冲突 | 重试一次；仍不符则询问是否确认差异继续，不能改写为身份相符 |
-| OCR 标签不清或编号不符 | 调整后重试；仍不符则标记未验证或冲突 |
-| 无 VOP | 流程正常；不输出机器识别的物品类别或配件结论 |
-| 少还配件或外观变化 | 逐项记录借还人回答，与原记录冲突时保留差异 |
-| 无原借出记录 | 可继续留证，但不得声称正常归还 |
-| 拍照失败、中止 | 不宣称留证完成；停止未发生的步骤，保留已发生事实 |
-| 重复安装 | 同一 `slug` 仅一项；其他 Skill 保留，配置不变时不再备份 |
+| 正常借出 | OCR → 配件 → 人脸 → `start`/`capture_photo` → 摘要，照片路径来自成功回执 |
+| 正常归还 | OCR → 人脸 → 配件 → 摘要，`vision_capture` 调用次数为零 |
+| 已提前提供信息 | 不重复询问，不增加额外外观/归还时间/交接确认阶段 |
+| OCR 无新结果或读错标签 | 当前阶段重读一次；仍失败标记编号未核验或冲突 |
+| 人脸未知、多人或姓名被否认 | 当前阶段重试一次；仍不明确标记人员未核验或冲突 |
+| 少还配件 | 与已有原记录逐项比较，复核后仍缺少则保留差异 |
+| 归还无原记录 | 继续生成摘要，但不能称正常归还 |
+| 借出拍照失败或取消 | 不报告留证成功；不执行未发生的步骤 |
+| 重复安装 | 同一 `slug` 仅一项，其他 Skill 不变；配置不变时不再备份 |
 
-本地安装测试：
-
-```bash
-python3 -m unittest discover -s tests -v
-```
-
-自动测试不能代替 Bumi 实机的相机、OCR、人脸和拍照流程验收。
+本地安装测试：`python3 -m unittest discover -s tests -v`。自动测试无法代替 Bumi 实机的调用顺序、OCR 结果、人脸结果与照片回执验收。
