@@ -12,7 +12,7 @@ from pathlib import Path
 
 
 SLUG = "bumi-item-handover"
-VERSION = "2.0.1"
+VERSION = "2.1.0"
 DEFAULT_DB = Path("/opt/phanthy-motus/data/data.db")
 DEFAULT_SKILL = Path(__file__).resolve().parents[1] / "SKILL.md"
 
@@ -46,14 +46,14 @@ def install(db_path: Path, skill_path: Path) -> tuple[str, Path | None]:
         "slug": SLUG,
         "name": "Bumi 办公物品借还自助核验",
         "description": description,
-        "oneLiner": "自助核对人员、物品和配件，拍照记录差异",
+        "oneLiner": "逐步引导借还，核对人脸与资产标签并拍照",
         "instruction": instruction,
         "category": "robot",
         "version": VERSION,
         "author": "local",
         "installedAt": now,
         "active": True,
-        "requiredTools": ["camera", "face_recognition", "ocr", "vop", "vision_capture"],
+        "requiredTools": ["camera", "face_recognition", "ocr", "vision_capture"],
         "configSchema": {},
         "icon": "📷",
     }
