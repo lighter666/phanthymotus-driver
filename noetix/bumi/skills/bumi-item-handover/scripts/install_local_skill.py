@@ -12,7 +12,7 @@ from pathlib import Path
 
 
 SLUG = "bumi-item-handover"
-VERSION = "3.2.0"
+VERSION = "3.3.0"
 DEFAULT_DB = Path("/opt/phanthy-motus/data/data.db")
 DEFAULT_SKILL = Path(__file__).resolve().parents[1] / "SKILL.md"
 
@@ -46,7 +46,7 @@ def install(db_path: Path, skill_path: Path) -> tuple[str, Path | None]:
         "slug": SLUG,
         "name": "Bumi 办公物品借还助手",
         "description": description,
-        "oneLiner": "逐步引导借用或归还；借用先标签和配件，归还先核验人脸",
+        "oneLiner": "办公物品借还：说借东西或还东西时逐步引导，借用先标签与配件，归还先人脸",
         "instruction": instruction,
         "category": "robot",
         "version": VERSION,

@@ -1,4 +1,5 @@
 import json
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -98,7 +99,7 @@ class InstallLocalSkillTests(unittest.TestCase):
             skill = settings["installed"][1]
             self.assertEqual(skill["installedAt"], old["installedAt"])
             self.assertEqual(skill["custom"], "retain")
-            self.assertEqual(skill["version"], "3.2.0")
+            self.assertEqual(skill["version"], "3.3.0")
             backups = list(db.parent.glob("skills-row-backup-bumi-item-handover-*.json"))
             self.assertEqual(len(backups), 1)
             backed_up = json.loads(backups[0].read_text(encoding="utf-8"))
@@ -112,6 +113,25 @@ class InstallLocalSkillTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(read_settings(db), original)
             self.assertEqual(list(db.parent.glob("skills-row-backup-*.json")), [])
+
+    def test_instruction_uses_supported_card_actions_and_live_ocr_topic(self):
+        instruction = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        calls = re.findall(
+            r'\b(tts|ocr|face_recognition)\(action="([^"]+)"([^)]*)\)',
+            instruction,
+        )
+        self.assertTrue(calls)
+        allowed = {
+            "tts": {"speak"},
+            "ocr": {"start", "info", "stop"},
+            "face_recognition": {"start", "recognize_by_stream"},
+        }
+        for tool, action, arguments in calls:
+            self.assertIn(action, allowed[tool], f"unsupported {tool} action: {action}")
+            if action == "start":
+                self.assertIn('input_topic="/remote_control/camera"', arguments)
+        self.assertIn("/remote_control/camera/ocr", instruction)
+        self.assertIn("没有该能力或新结果时暂停登记", instruction)
 
     def test_read_only_check_detects_legacy_instructions(self):
         with trial_db() as db:

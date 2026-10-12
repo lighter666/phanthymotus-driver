@@ -1,12 +1,12 @@
 # Bumi 办公物品借还助手
 
-此 Skill 先确定借用或归还，再只执行对应的一套逐步提示。Bumi 每次只告诉员工**当前要做什么**，等到明确答复或真实卡片结果才进入下一步。当前环境不支持拍照，本流程不调用拍照卡片。只有环境实际提供保存机制且返回成功，才播报“登记完成”。
+此 Skill 把“借用、借东西、借设备”和“归还、还东西、还设备”分别导入两套逐步提示。Bumi 每次只告诉员工**当前要做什么**，等到明确答复或真实卡片结果才进入下一步。借用保持“标签 → 配件 → 人脸”的现有顺序，归还保持“人脸 → 标签 → 配件”的现有顺序。当前环境不支持拍照；只有记录实际保存成功才播报“登记完成”。
 
 ## 画布与运行前提
 
-- 启用 `face_recognition`、`tts`、`ocr`。人脸卡片须已接入实时摄像头，并使用公司的已登记员工人脸库。`recognize_by_stream` 是本流程唯一的人脸识别动作；`recognize`、`recognize_by_photo`、`recognize_by_url` 均不用于本流程。
+- 启用 `face_recognition`、`tts`、`ocr`。语音使用 `tts(action="speak", text="...")`；人脸卡片未运行时用 `face_recognition(action="start", input_topic="/remote_control/camera")`，识别时用 `face_recognition(action="recognize_by_stream")`。人脸卡片须接入公司员工库；不调用 `recognize`、照片/URL 识别或注册动作。
 - 相机输出 `/remote_control/camera` 接入 OCR。调用 `ocr(action="start", input_topic="/remote_control/camera")`，其输出为 `/remote_control/camera/ocr`。必须让当前运行环境能**接收并读取该输出话题的实际新消息**；仅把 OCR 卡片连在画布上、调用 `start` 或查询 `info`，不能保证决策核心读到标签文字。若环境没有话题消息接收能力，Skill 会暂停登记，需要先由部署方打通消息接收链路。
-- 语音提示由 `tts(action="speak", text="...")` 执行。保留员工答复进入决策核心的输入链路。若要完成自动登记，还需环境实际提供可调用的记录保存机制和成功回执；没有时输出待保存的结构化记录。
+- 保留员工答复进入决策核心的输入链路。若要完成自动登记，还需环境实际提供可调用的记录保存机制和成功回执；没有时输出待保存的结构化记录。`--check` 只核对数据库中的 Skill；界面启用后，模型还需调用 `activate_skill` 才会加载完整指令。
 - 每件标签应能清晰显示资产名称、SN 号、资产编号。缺任何一项时继续引导调整，不把口述或 `start` 回执当 OCR 结果。历史借用记录仅在环境实际提供时关联。
 
 卡片接口参考：[人脸识别源码](https://github.com/4paradigm/phanthymotus/blob/main/perception/plugins/face.py)、[OCR 源码](https://github.com/4paradigm/phanthymotus/blob/main/perception/plugins/ocr.py)、[TTS 源码](https://github.com/4paradigm/phanthymotus/blob/main/perception/plugins/tts.py)。
@@ -40,7 +40,7 @@ python3 scripts/install_local_skill.py
 python3 scripts/install_local_skill.py --check
 ```
 
-脚本默认操作 `/opt/phanthy-motus/data/data.db` 的 `config.skills`：变更前备份旧值、按同一 `slug` 新增或更新、保留其他 Skill，写后重新读取核对。数据库不在默认位置时加 `--db /实际路径/data.db`。检查应显示 `版本=3.2.0`、`与本目录 SKILL.md 一致：是`。刷新 Skill 列表并重新激活；推送 GitHub 分支不会自动修改 Bumi 数据库。
+脚本默认操作 `/opt/phanthy-motus/data/data.db` 的 `config.skills`：变更前备份旧值、按同一 `slug` 新增或更新、保留其他 Skill，写后重新读取核对。数据库不在默认位置时加 `--db /实际路径/data.db`。检查应显示 `版本=3.3.0`、`与本目录 SKILL.md 一致：是`。刷新 Skill 列表并重新激活；推送 GitHub 分支不会自动修改 Bumi 数据库。
 
 ## 验收
 
@@ -56,5 +56,6 @@ python3 scripts/install_local_skill.py --check
 | 归还无原记录或字段不符 | 标注缺少基线或逐项差异，不自动认定正常归还 |
 | 无保存机制、保存失败、取消 | 分别写等待保存、保存失败、当前件中止；都不宣布登记完成 |
 | 多件物品与重复安装 | 每件只用各自的新 OCR 结果；同一 `slug` 仅一项且其他 Skill 不变 |
+| “我要借东西” | 直接进入借用分支，首先播报“请问您要借用什么物品？” |
 
 本地安装测试：`python3 -m unittest discover -s tests -v`。这些测试不能代替 Bumi 实机上的话题消息、人脸库、TTS 与保存回执验收。
