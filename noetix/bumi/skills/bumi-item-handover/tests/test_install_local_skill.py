@@ -98,7 +98,7 @@ class InstallLocalSkillTests(unittest.TestCase):
             skill = settings["installed"][1]
             self.assertEqual(skill["installedAt"], old["installedAt"])
             self.assertEqual(skill["custom"], "retain")
-            self.assertEqual(skill["version"], "3.0.0")
+            self.assertEqual(skill["version"], "3.1.0")
             backups = list(db.parent.glob("skills-row-backup-bumi-item-handover-*.json"))
             self.assertEqual(len(backups), 1)
             backed_up = json.loads(backups[0].read_text(encoding="utf-8"))
