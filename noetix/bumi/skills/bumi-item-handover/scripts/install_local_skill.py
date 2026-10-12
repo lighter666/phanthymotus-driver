@@ -12,7 +12,7 @@ from pathlib import Path
 
 
 SLUG = "bumi-item-handover"
-VERSION = "2.2.0"
+VERSION = "3.0.0"
 DEFAULT_DB = Path("/opt/phanthy-motus/data/data.db")
 DEFAULT_SKILL = Path(__file__).resolve().parents[1] / "SKILL.md"
 
@@ -44,18 +44,18 @@ def install(db_path: Path, skill_path: Path) -> tuple[str, Path | None]:
     now = dt.datetime.now().astimezone().isoformat(timespec="seconds")
     template = {
         "slug": SLUG,
-        "name": "Bumi 办公物品借还自助核验",
+        "name": "Bumi 办公物品借还助手",
         "description": description,
-        "oneLiner": "借出 OCR→配件→人脸→拍照；归还 OCR→人脸→配件",
+        "oneLiner": "先核验员工，再逐件 OCR 识别、确认并生成借还记录",
         "instruction": instruction,
         "category": "robot",
         "version": VERSION,
         "author": "local",
         "installedAt": now,
         "active": True,
-        "requiredTools": ["camera", "face_recognition", "ocr", "vision_capture"],
+        "requiredTools": ["face_recognition", "tts", "ocr"],
         "configSchema": {},
-        "icon": "📷",
+        "icon": "📋",
     }
     with closing(sqlite3.connect(db_path, timeout=15)) as conn:
         conn.execute("PRAGMA busy_timeout=15000")

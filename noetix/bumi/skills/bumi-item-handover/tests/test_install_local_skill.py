@@ -67,8 +67,11 @@ class InstallLocalSkillTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             skill = read_settings(db)["installed"][0]
             self.assertEqual(skill["slug"], SLUG)
-            self.assertEqual(skill["requiredTools"], ["camera", "face_recognition", "ocr", "vision_capture"])
-            self.assertIn("capture_photo", skill["instruction"])
+            self.assertEqual(skill["requiredTools"], ["face_recognition", "tts", "ocr"])
+            self.assertNotIn("vision_capture", skill["requiredTools"])
+            self.assertIn('ocr(action="start", input_topic="/remote_control/camera")', skill["instruction"])
+            self.assertIn("/remote_control/camera/ocr", skill["instruction"])
+            self.assertIn('tts(action="speak"', skill["instruction"])
             self.assertIn("recognize_by_stream", skill["instruction"])
             backups = list(db.parent.glob("skills-row-backup-bumi-item-handover-*.json"))
             self.assertEqual(len(backups), 1)
@@ -95,7 +98,7 @@ class InstallLocalSkillTests(unittest.TestCase):
             skill = settings["installed"][1]
             self.assertEqual(skill["installedAt"], old["installedAt"])
             self.assertEqual(skill["custom"], "retain")
-            self.assertEqual(skill["version"], "2.2.0")
+            self.assertEqual(skill["version"], "3.0.0")
             backups = list(db.parent.glob("skills-row-backup-bumi-item-handover-*.json"))
             self.assertEqual(len(backups), 1)
             backed_up = json.loads(backups[0].read_text(encoding="utf-8"))
