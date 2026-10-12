@@ -15,8 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "install_local_skill.py"
 SLUG = "bumi-item-handover"
 FIELDS = (
-    "asset_id", "asset_name", "category", "sn", "accessories",
-    "administrator", "administrator_open_id", "status",
+    "asset_id", "asset_name", "category", "sn", "accessories", "status",
 )
 SCRATCH = ROOT / ".tmp"
 SCRATCH.mkdir(exist_ok=True)
@@ -54,9 +53,15 @@ def write_assets(path: Path, rows=(), fields=FIELDS):
 def asset(asset_id="0001", name="投影仪A", category="投影仪", status="可用"):
     return {
         "asset_id": asset_id, "asset_name": name, "category": category,
-        "sn": "SN-001", "accessories": "电源线1根", "administrator": "张三",
-        "administrator_open_id": "ou_test", "status": status,
+        "sn": "SN-001", "accessories": "电源线1根", "status": status,
     }
+
+
+def write_administrator(path: Path, name="", open_id=""):
+    path.write_text(
+        json.dumps({"name": name, "feishu_open_id": open_id}, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
 
 def read_settings(path: Path):
@@ -65,10 +70,12 @@ def read_settings(path: Path):
     return json.loads(row[0]) if row else None
 
 
-def invoke(path: Path, assets: Path | None = None, *flags):
+def invoke(path: Path, assets: Path | None = None, *flags, administrator: Path | None = None):
     command = [sys.executable, "-X", "utf8", str(SCRIPT), "--db", str(path)]
     if assets:
         command.extend(["--assets", str(assets)])
+    if administrator:
+        command.extend(["--administrator", str(administrator)])
     command.extend(flags)
     return subprocess.run(
         command, text=True, encoding="utf-8", errors="replace", capture_output=True,
@@ -88,9 +95,11 @@ class InstallLocalSkillTests(unittest.TestCase):
             result = invoke(db)
             self.assertEqual(result.returncode, 0, result.stderr)
             skill = read_settings(db)["installed"][0]
-            self.assertEqual(skill["version"], "4.0.0")
+            self.assertEqual(skill["version"], "5.0.0")
             self.assertEqual(skill["requiredTools"], ["face_recognition", "tts", "channel_reply"])
             self.assertEqual(snapshot(skill["instruction"])["资产目录"], [])
+            self.assertEqual(snapshot(skill["instruction"])["管理员配置"],
+                             {"姓名": "未配置", "飞书ID": "未配置"})
             self.assertEqual(snapshot(skill["instruction"])["候选索引"],
                              {"按类别": {}, "按名称": {}})
             self.assertIn("待人工转发", skill["instruction"])
@@ -118,7 +127,7 @@ class InstallLocalSkillTests(unittest.TestCase):
             self.assertEqual(data["候选索引"]["按名称"],
                              {"投影仪B": "0001", "投影仪A": "0009"})
             self.assertEqual(data["资产目录"][1]["SN"], "SN-001")
-            self.assertEqual(data["资产目录"][1]["管理员飞书ID"], "ou_test")
+            self.assertNotIn("管理员飞书ID", data["资产目录"][1])
 
     def test_no_available_asset_has_no_candidate(self):
         with trial_db() as db:
@@ -136,7 +145,7 @@ class InstallLocalSkillTests(unittest.TestCase):
             cases = [
                 [asset(), asset()],
                 [asset(status="未知")],
-                [{**asset(), "administrator": ""}],
+                [{**asset(), "asset_name": ""}],
             ]
             for rows in cases:
                 with self.subTest(rows=rows):
@@ -186,6 +195,39 @@ class InstallLocalSkillTests(unittest.TestCase):
             self.assertEqual(read_settings(db), original)
             self.assertEqual(list(db.parent.glob("skills-row-backup-*.json")), [])
 
+    def test_single_administrator_config_and_change_detection(self):
+        with trial_db() as db:
+            create_db(db)
+            catalog = db.parent / "assets.csv"
+            admin = db.parent / "administrator.json"
+            write_assets(catalog, [asset("0001"), asset("0002", "笔记本", "笔记本")])
+            write_administrator(admin, "陈管理员", "ou_admin")
+            self.assertEqual(invoke(db, catalog, administrator=admin).returncode, 0)
+            data = snapshot(read_settings(db)["installed"][0]["instruction"])
+            self.assertEqual(data["管理员配置"], {"姓名": "陈管理员", "飞书ID": "ou_admin"})
+            self.assertTrue(all("管理员" not in row for row in data["资产目录"]))
+            self.assertEqual(invoke(db, catalog, "--check", administrator=admin).returncode, 0)
+            write_administrator(admin, "新管理员", "ou_new")
+            self.assertNotEqual(invoke(db, catalog, "--check", administrator=admin).returncode, 0)
+            self.assertEqual(invoke(db, catalog, administrator=admin).returncode, 0)
+            self.assertEqual(invoke(db, catalog, "--check", administrator=admin).returncode, 0)
+
+    def test_bad_administrator_config_does_not_write(self):
+        with trial_db() as db:
+            create_db(db, {"installed": []})
+            admin = db.parent / "administrator.json"
+            cases = [
+                {"name": "", "feishu_open_id": "ou_admin"},
+                {"name": "管理员"},
+                {"name": "管理员", "feishu_open_id": 123},
+            ]
+            for bad in cases:
+                with self.subTest(bad=bad):
+                    admin.write_text(json.dumps(bad, ensure_ascii=False), encoding="utf-8")
+                    self.assertNotEqual(invoke(db, administrator=admin).returncode, 0)
+                    self.assertEqual(read_settings(db), {"installed": []})
+                    self.assertEqual(list(db.parent.glob("skills-row-backup-*.json")), [])
+
     def test_instruction_uses_only_supported_card_actions(self):
         instruction = (ROOT / "SKILL.md").read_text(encoding="utf-8")
         calls = re.findall(
@@ -200,6 +242,9 @@ class InstallLocalSkillTests(unittest.TestCase):
         self.assertNotRegex(instruction, r'\bocr\(action=')
         self.assertIn("source_message_id", instruction)
         self.assertIn("管理员飞书确认", instruction)
+        self.assertIn("归还请求｜待人工转发给资产管理员", instruction)
+        self.assertIn("唯一资产管理员", instruction)
+        self.assertIn("等候员工到场", instruction)
 
     def test_read_only_check_rejects_legacy_and_conflicting_skill(self):
         with trial_db() as db:
@@ -224,7 +269,7 @@ class InstallLocalSkillTests(unittest.TestCase):
                 conn.commit()
             current = invoke(db, None, "--check")
             self.assertEqual(current.returncode, 0, current.stdout + current.stderr)
-            self.assertIn("SKILL.md 及资产 CSV 一致：是", current.stdout)
+            self.assertIn("Skill、资产 CSV 及管理员配置一致：是", current.stdout)
 
 
 if __name__ == "__main__":
